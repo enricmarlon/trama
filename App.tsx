@@ -51,6 +51,14 @@ type Expense = {
   amount: number;
 };
 
+type Supply = {
+  id: string;
+  name: string;
+  quantity: number;
+  dailyUse: number;
+  registeredDate: string;
+};
+
 type Offer = {
   id: string;
   productId: string;
@@ -64,6 +72,7 @@ type StoreData = {
   products: Product[];
   sales: Sale[];
   expenses: Expense[];
+  supplies: Supply[];
   offers: Offer[];
   company?: CompanyProfile;
 };
@@ -95,8 +104,8 @@ type Palette = {
   canvasShade: string;
 };
 
-type Tab = 'home' | 'products' | 'sales' | 'management';
-type FormType = 'product' | 'sale' | 'expense' | 'offer' | null;
+type Tab = 'home' | 'products' | 'sales' | 'supplies' | 'management';
+type FormType = 'product' | 'sale' | 'expense' | 'supply' | 'offer' | null;
 
 const STORAGE_KEY = '@trama/store-data-v1';
 const BUSINESS_TYPES = [
@@ -195,13 +204,29 @@ function createPalette(primary: string): Palette {
 
 const DEFAULT_PALETTE = createPalette(BASE_COLORS[1].value);
 
-const initialData: StoreData = { products: [], sales: [], expenses: [], offers: [] };
+const initialData: StoreData = { products: [], sales: [], expenses: [], supplies: [], offers: [] };
 
 const money = (value: number) =>
   value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function elapsedDays(startDate: string, endDate: string) {
+  const toUtcDay = (value: string) => {
+    const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.max(0, Math.floor((toUtcDay(endDate) - toUtcDay(startDate)) / 86_400_000));
+}
+
+function availableSupplyQuantity(supply: Supply, today: string) {
+  return Math.max(0, supply.quantity - elapsedDays(supply.registeredDate, today) * supply.dailyUse);
+}
+
+function supplyDaysRemaining(dailyUse: number, quantity: number) {
+  return quantity > 0 && dailyUse > 0 ? Math.ceil(quantity / dailyUse) : 0;
 }
 
 const parseAmount = (value: string) => {
@@ -289,6 +314,9 @@ export default function App() {
   const [expenseName, setExpenseName] = useState('');
   const [expenseCategory, setExpenseCategory] = useState('Matéria-prima');
   const [expenseAmount, setExpenseAmount] = useState('');
+  const [supplyName, setSupplyName] = useState('');
+  const [supplyQuantity, setSupplyQuantity] = useState('');
+  const [supplyDailyUse, setSupplyDailyUse] = useState('');
   const [offerProductId, setOfferProductId] = useState('');
   const [offerName, setOfferName] = useState('');
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
@@ -312,7 +340,10 @@ export default function App() {
     let active = true;
     AsyncStorage.getItem(STORAGE_KEY)
       .then((saved) => {
-        if (saved && active) setData(JSON.parse(saved) as StoreData);
+        if (saved && active) {
+          const savedData = JSON.parse(saved) as Partial<StoreData>;
+          setData({ ...initialData, ...savedData, supplies: savedData.supplies ?? [] });
+        }
       })
       .catch(() => {
         Alert.alert('Não foi possível carregar os dados', 'Confira o armazenamento do dispositivo e tente novamente.');
@@ -356,6 +387,13 @@ export default function App() {
   );
   const maxRevenueBar = Math.max(1, ...revenueBars);
   const lowStockProducts = data.products.filter((product) => product.stock <= product.lowStockAt);
+  const today = localDateKey(new Date());
+  const suppliesWithStock = data.supplies.map((supply) => ({
+    supply,
+    quantity: availableSupplyQuantity(supply, today),
+  }));
+  const lowStockSupplies = suppliesWithStock.filter(({ quantity }) => quantity < 2);
+  const lowStockCount = lowStockProducts.length + lowStockSupplies.length;
   const visibleProducts = data.products.filter((product) => product.name.toLowerCase().includes(query.toLowerCase()));
   const monthLabel = month.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
@@ -377,6 +415,11 @@ export default function App() {
       setExpenseName('');
       setExpenseCategory('Matéria-prima');
       setExpenseAmount('');
+    }
+    if (next === 'supply') {
+      setSupplyName('');
+      setSupplyQuantity('');
+      setSupplyDailyUse('');
     }
     if (next === 'offer') {
       setOfferProductId(data.products[0]?.id ?? '');
@@ -529,6 +572,40 @@ export default function App() {
     closeForm();
   };
 
+  const saveSupply = () => {
+    const quantity = Number.parseInt(supplyQuantity, 10);
+    const dailyUse = Number.parseInt(supplyDailyUse, 10);
+    if (!supplyName.trim() || !Number.isInteger(quantity) || quantity < 0 || !Number.isInteger(dailyUse) || dailyUse < 1) {
+      Alert.alert('Confira os dados', 'Informe o nome, uma quantidade igual ou maior que zero e o consumo diário em unidades inteiras.');
+      return;
+    }
+    const supply: Supply = {
+      id: `i${Date.now()}`,
+      name: supplyName.trim(),
+      quantity,
+      dailyUse,
+      registeredDate: localDateKey(new Date()),
+    };
+    setData((current) => ({ ...current, supplies: [supply, ...current.supplies] }));
+    closeForm();
+  };
+
+  const changeSupplyStock = (supplyId: string, adjustment: number) => {
+    setData((current) => ({
+      ...current,
+      supplies: current.supplies.map((supply) => {
+        if (supply.id !== supplyId) return supply;
+        const today = localDateKey(new Date());
+        const quantity = availableSupplyQuantity(supply, today);
+        return {
+          ...supply,
+          quantity: Math.max(0, quantity + adjustment),
+          registeredDate: today,
+        };
+      }),
+    }));
+  };
+
   const saveOffer = () => {
     const value = parseAmount(discountValue);
     const product = data.products.find((item) => item.id === offerProductId);
@@ -574,6 +651,7 @@ export default function App() {
     { key: 'home', icon: '⌂', label: 'Início' },
     { key: 'products', icon: '▦', label: 'Produtos' },
     { key: 'sales', icon: '↗', label: 'Vendas' },
+    { key: 'supplies', icon: '▤', label: 'Insumos' },
     { key: 'management', icon: '☷', label: 'Gestão' },
   ];
 
@@ -726,12 +804,12 @@ export default function App() {
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${lowStockProducts.length} alertas de estoque`}
-        onPress={() => setTab('products')}
+        accessibilityLabel={`${lowStockCount} alertas de estoque`}
+        onPress={() => setTab(lowStockSupplies.length > 0 ? 'supplies' : 'products')}
         style={styles.notificationButton}
       >
         <Text style={styles.notificationIcon}>♧</Text>
-        {lowStockProducts.length > 0 ? <View style={styles.notificationDot} /> : null}
+        {lowStockCount > 0 ? <View style={styles.notificationDot} /> : null}
       </Pressable>
     </View>
   );
@@ -793,6 +871,17 @@ export default function App() {
           <View style={styles.alertCopy}>
             <Text style={styles.alertTitle}>Estoque pedindo atenção</Text>
             <Text style={styles.alertText}>{lowStockProducts.length} produto(s) no limite ou abaixo do mínimo</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
+      ) : null}
+
+      {lowStockSupplies.length > 0 ? (
+        <Pressable style={styles.stockAlert} onPress={() => setTab('supplies')}>
+          <View style={styles.alertIcon}><Text style={styles.alertIconText}>!</Text></View>
+          <View style={styles.alertCopy}>
+            <Text style={styles.alertTitle}>Insumos com estoque baixo</Text>
+            <Text style={styles.alertText}>{lowStockSupplies.length} insumo(s) com menos de 2 unidades</Text>
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
@@ -923,6 +1012,66 @@ export default function App() {
     </>
   );
 
+  const renderSupplies = () => (
+    <>
+      <Text style={styles.pageEyebrow}>MATERIAIS DO NEGÓCIO</Text>
+      <View style={styles.pageHeadingRow}>
+        <View>
+          <Text style={styles.pageTitle}>Insumos</Text>
+          <Text style={styles.pageSubtitle}>{data.supplies.length} insumos cadastrados</Text>
+        </View>
+        <ActionButton label="+ Cadastrar" onPress={() => openForm('supply')} compact />
+      </View>
+      <Text style={styles.formIntro}>Acompanhe a quantidade disponível e a duração estimada pelo consumo diário.</Text>
+      {lowStockSupplies.length > 0 ? (
+        <View style={styles.inventoryNotice}>
+          <Text style={styles.inventoryNoticeIcon}>!</Text>
+          <Text style={styles.inventoryNoticeText}>{lowStockSupplies.length} insumo(s) com menos de 2 unidades</Text>
+        </View>
+      ) : null}
+      <View style={styles.listCard}>
+        {suppliesWithStock.map(({ supply, quantity }, index) => {
+          const low = quantity < 2;
+          const daysRemaining = supplyDaysRemaining(supply.dailyUse, quantity);
+          return (
+            <View key={supply.id} style={[styles.supplyRow, index > 0 && styles.rowDivider]}>
+              <View style={styles.supplyIcon}><Text style={styles.supplyIconText}>▤</Text></View>
+              <View style={styles.recentSaleCopy}>
+                <Text style={styles.recentSaleName}>{supply.name}</Text>
+                <Text style={[styles.recentSaleDate, low && styles.stockLabelLow]}>
+                  {quantity} unidade(s) · {daysRemaining} {daysRemaining === 1 ? 'dia restante' : 'dias restantes'}
+                </Text>
+                <Text style={styles.supplyConsumption}>{supply.dailyUse} unidade(s) por dia</Text>
+              </View>
+              <View style={styles.quantityStepper}>
+                <Pressable
+                  style={[styles.stepButton, quantity === 0 && styles.stepButtonDisabled]}
+                  onPress={() => changeSupplyStock(supply.id, -1)}
+                  disabled={quantity === 0}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remover uma unidade de ${supply.name}`}
+                >
+                  <Text style={styles.stepText}>−</Text>
+                </Pressable>
+                <Text style={[styles.stockCount, low && styles.stockCountLow]}>{quantity}</Text>
+                <Pressable
+                  style={styles.stepButton}
+                  onPress={() => changeSupplyStock(supply.id, 1)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Adicionar uma unidade de ${supply.name}`}
+                >
+                  <Text style={styles.stepText}>+</Text>
+                </Pressable>
+              </View>
+            </View>
+          );
+        })}
+        {data.supplies.length === 0 ? <Text style={styles.emptyText}>Cadastre insumos para acompanhar quantidades e duração.</Text> : null}
+      </View>
+      <View style={styles.bottomSpacer} />
+    </>
+  );
+
   const renderManagement = () => (
     <>
       <Text style={styles.pageEyebrow}>VISÃO DO NEGÓCIO</Text>
@@ -1016,8 +1165,11 @@ export default function App() {
   );
 
   const renderForm = () => {
-    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? 'Nova venda' : form === 'expense' ? 'Registrar gasto' : 'Criar oferta';
-    const canSave = form === 'product' || form === 'sale' || form === 'expense' || form === 'offer';
+    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? 'Nova venda' : form === 'expense' ? 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
+    const canSave = form === 'product' || form === 'sale' || form === 'expense' || form === 'supply' || form === 'offer';
+    const supplyQuantityNumber = Number.parseInt(supplyQuantity, 10);
+    const supplyDailyUseNumber = Number.parseInt(supplyDailyUse, 10);
+    const estimatedSupplyDays = supplyDaysRemaining(supplyDailyUseNumber, supplyQuantityNumber);
     return (
       <Modal visible={form !== null} transparent animationType="slide" onRequestClose={closeForm}>
         <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1102,6 +1254,25 @@ export default function App() {
                   {renderField('Valor da compra', expenseAmount, setExpenseAmount, '0,00', 'decimal-pad')}
                 </>
               ) : null}
+              {form === 'supply' ? (
+                <>
+                  <Text style={styles.formIntro}>Acompanhe o estoque e a duração estimada de cada material.</Text>
+                  {renderField('Nome do insumo', supplyName, setSupplyName, 'Ex.: Linha de algodão')}
+                  <View style={styles.formColumns}>
+                    <View style={styles.formColumn}>{renderField('Quantidade disponível', supplyQuantity, setSupplyQuantity, '10', 'number-pad')}</View>
+                    <View style={styles.formColumn}>{renderField('Consumo por dia', supplyDailyUse, setSupplyDailyUse, '2', 'number-pad')}</View>
+                  </View>
+                  <Text style={styles.fieldHint}>Alerta de estoque quando restarem menos de 2 unidades. A duração é estimada pelo consumo diário.</Text>
+                  {supplyDailyUseNumber > 0 && supplyQuantityNumber >= 0 ? (
+                    <View style={styles.offerPreview}>
+                      <Text style={styles.offerPreviewLabel}>DURAÇÃO ESTIMADA</Text>
+                      <Text style={styles.offerPreviewValue}>
+                        {estimatedSupplyDays} {estimatedSupplyDays === 1 ? 'dia' : 'dias'}
+                      </Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
               {form === 'offer' ? (
                 <>
                   <Text style={styles.formIntro}>Escolha um produto e defina o desconto que será aplicado nas vendas.</Text>
@@ -1132,8 +1303,8 @@ export default function App() {
               ) : null}
               {canSave ? (
                 <ActionButton
-                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? 'Confirmar venda' : form === 'expense' ? 'Salvar gasto' : 'Ativar oferta'}
-                  onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'expense' ? saveExpense : saveOffer}
+                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? 'Confirmar venda' : form === 'expense' ? 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
+                  onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'expense' ? saveExpense : form === 'supply' ? saveSupply : saveOffer}
                 />
               ) : null}
             </ScrollView>
@@ -1170,6 +1341,7 @@ export default function App() {
                 {tab === 'home' ? renderHome() : null}
                 {tab === 'products' ? renderProducts() : null}
                 {tab === 'sales' ? renderSales() : null}
+                {tab === 'supplies' ? renderSupplies() : null}
                 {tab === 'management' ? renderManagement() : null}
               </ScrollView>
               <SafeAreaView edges={['bottom']} style={styles.bottomSafeArea}>
@@ -1357,6 +1529,11 @@ function createStyles(COLORS: Palette) {
   financeTotalLabel: { color: COLORS.ink, fontSize: 12, fontWeight: '700' },
   financeTotal: { color: COLORS.ink, fontSize: 16, fontWeight: '700' },
   managementActions: { flexDirection: 'row', gap: 10, marginBottom: 1 },
+  supplyRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11 },
+  supplyIcon: { width: 35, height: 35, borderRadius: 12, backgroundColor: COLORS.paleGreen, alignItems: 'center', justifyContent: 'center' },
+  supplyIconText: { color: COLORS.green, fontSize: 16, fontWeight: '700' },
+  supplyConsumption: { color: COLORS.muted, fontSize: 9, marginTop: 3 },
+  stepButtonDisabled: { opacity: 0.4 },
   expenseRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
   expenseIcon: { width: 34, height: 34, borderRadius: 12, backgroundColor: COLORS.paleOrange, alignItems: 'center', justifyContent: 'center' },
   expenseIconText: { color: COLORS.orange, fontSize: 15, fontWeight: '700' },
