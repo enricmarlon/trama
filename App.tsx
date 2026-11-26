@@ -475,17 +475,30 @@ export default function App() {
     setEditingCompany(true);
   };
 
-  const choosePhoto = async () => {
+  const choosePhoto = async (source: 'gallery' | 'camera') => {
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.75,
-      });
+      const permission = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Permissão necessária',
+          source === 'camera'
+            ? 'Permita o acesso à câmera para fotografar o produto.'
+            : 'Permita o acesso às fotos para escolher uma imagem do produto.',
+        );
+        return;
+      }
+      const options = { allowsEditing: true, aspect: [1, 1] as [number, number], quality: 0.75 };
+      const result = source === 'camera'
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync({ ...options, mediaTypes: ['images'] });
       if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri);
     } catch {
-      Alert.alert('Não foi possível abrir as fotos', 'Tente novamente ou escolha outra imagem.');
+      Alert.alert(
+        source === 'camera' ? 'Não foi possível abrir a câmera' : 'Não foi possível abrir a galeria',
+        'Confira as permissões do dispositivo e tente novamente.',
+      );
     }
   };
 
@@ -635,6 +648,27 @@ export default function App() {
         product.id === productId ? { ...product, stock: Math.max(0, product.stock + adjustment) } : product,
       ),
     }));
+  };
+
+  const deleteProduct = (productId: string) => {
+    const product = data.products.find((item) => item.id === productId);
+    if (!product) return;
+    Alert.alert(
+      'Excluir produto?',
+      `${product.name} será removido do catálogo. O histórico de vendas será mantido.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => setData((current) => ({
+            ...current,
+            products: current.products.filter((item) => item.id !== productId),
+            offers: current.offers.filter((offer) => offer.productId !== productId),
+          })),
+        },
+      ],
+    );
   };
 
   const toggleOffer = (offerId: string) => {
@@ -950,7 +984,17 @@ export default function App() {
               </View>
               <View style={styles.productCardContent}>
                 <Text style={styles.productCategory}>{product.category.toUpperCase()}</Text>
-                <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                <View style={styles.productNameRow}>
+                  <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                  <Pressable
+                    style={styles.deleteProductButton}
+                    onPress={() => deleteProduct(product.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Excluir ${product.name}`}
+                  >
+                    <Text style={styles.deleteProductText}>Excluir</Text>
+                  </Pressable>
+                </View>
                 <View style={styles.productPriceRow}>
                   <Text style={styles.productPrice}>{money(priceFor(product))}</Text>
                   {offer ? <Text style={styles.oldPrice}>{money(product.price)}</Text> : null}
@@ -1183,9 +1227,25 @@ export default function App() {
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
               {form === 'product' ? (
                 <>
-                  <Pressable style={styles.photoPicker} onPress={choosePhoto} accessibilityRole="button">
-                    {photoUri ? <Image source={{ uri: photoUri }} style={styles.photoPreview} /> : <View style={styles.photoPlaceholder}><Text style={styles.photoPlaceholderIcon}>＋</Text><Text style={styles.photoPlaceholderText}>Adicionar foto</Text></View>}
-                  </Pressable>
+                  <View style={styles.photoPicker}>
+                    {photoUri ? <Image source={{ uri: photoUri }} style={styles.photoPreview} /> : <View style={styles.photoPlaceholder}><Text style={styles.photoPlaceholderIcon}>＋</Text><Text style={styles.photoPlaceholderText}>Foto do produto</Text></View>}
+                  </View>
+                  <View style={styles.photoSourceRow}>
+                    <Pressable
+                      style={styles.photoSourceButton}
+                      onPress={() => choosePhoto('gallery')}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.photoSourceText}>Galeria</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.photoSourceButton}
+                      onPress={() => choosePhoto('camera')}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.photoSourceText}>Câmera</Text>
+                    </Pressable>
+                  </View>
                   {renderField('Nome do produto', productName, setProductName, 'Ex.: Caneca de cerâmica')}
                   {renderChoices('Categoria', ['Casa', 'Cerâmica', 'Têxtil', 'Acessórios'], productCategory, setProductCategory)}
                   <View style={styles.formColumns}>
@@ -1495,7 +1555,10 @@ function createStyles(COLORS: Palette) {
   offerPillText: { color: COLORS.white, fontSize: 8, fontWeight: '700', letterSpacing: 0.6 },
   productCardContent: { padding: 11 },
   productCategory: { color: COLORS.muted, fontSize: 8, letterSpacing: 1, fontWeight: '700' },
-  productName: { color: COLORS.ink, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  productNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  productName: { color: COLORS.ink, fontSize: 12, fontWeight: '700', flex: 1 },
+  deleteProductButton: { backgroundColor: COLORS.paleOrange, borderRadius: 7, paddingHorizontal: 6, paddingVertical: 5 },
+  deleteProductText: { color: COLORS.red, fontSize: 8, fontWeight: '700' },
   productPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
   productPrice: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
   oldPrice: { color: COLORS.muted, fontSize: 9, textDecorationLine: 'line-through' },
@@ -1550,11 +1613,14 @@ function createStyles(COLORS: Palette) {
   closeButton: { width: 32, height: 32, borderRadius: 11, backgroundColor: COLORS.paleGreen, alignItems: 'center', justifyContent: 'center' },
   closeButtonText: { color: COLORS.ink, fontSize: 22, lineHeight: 24 },
   modalContent: { paddingBottom: 17 },
-  photoPicker: { alignSelf: 'center', marginVertical: 8, width: 94, height: 94, borderRadius: 19, overflow: 'hidden', backgroundColor: COLORS.paleGreen },
+  photoPicker: { alignSelf: 'center', marginTop: 8, width: 94, height: 94, borderRadius: 19, overflow: 'hidden', backgroundColor: COLORS.paleGreen },
   photoPreview: { width: '100%', height: '100%' },
   photoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   photoPlaceholderIcon: { color: COLORS.green, fontSize: 25, lineHeight: 29 },
   photoPlaceholderText: { color: COLORS.green, fontSize: 9, fontWeight: '600', marginTop: 3 },
+  photoSourceRow: { flexDirection: 'row', gap: 9, marginTop: 10 },
+  photoSourceButton: { flex: 1, minHeight: 42, borderRadius: 11, backgroundColor: COLORS.paleGreen, alignItems: 'center', justifyContent: 'center' },
+  photoSourceText: { color: COLORS.green, fontSize: 12, fontWeight: '700' },
   fieldGroup: { marginTop: 14 },
   fieldLabel: { color: COLORS.ink, fontSize: 11, fontWeight: '600', marginBottom: 7 },
   fieldInput: { minHeight: 46, borderRadius: 12, backgroundColor: COLORS.white, paddingHorizontal: 13, color: COLORS.ink, fontSize: 13 },

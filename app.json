@@ -11,7 +11,8 @@
         "expo-image-picker",
         {
           "microphonePermission": false,
-          "photosPermission": "Permita que o Trama escolha fotos para os produtos da sua loja."
+          "photosPermission": "Permita que o Trama escolha fotos para os produtos da sua loja.",
+          "cameraPermission": "Permita que o Trama use a câmera para fotografar os produtos."
         }
       ]
     ],
