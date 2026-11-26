@@ -1,5 +1,8 @@
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -54,10 +57,12 @@ import ProductPicture from './components/ProductPicture';
 import SectionTitle from './components/SectionTitle';
 import AlertsScreen from './screens/AlertsScreen';
 import ProductsScreen from './screens/ProductsScreen';
+import { createBackupFile, persistProductImage, readBackupFile } from './backup';
 
 export default function App() {
   const [data, setData] = useState<StoreData>(initialData);
   const [loaded, setLoaded] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [form, setForm] = useState<FormType>(null);
   const [month, setMonth] = useState(new Date());
@@ -278,6 +283,93 @@ export default function App() {
     setEditingCompany(false);
   };
 
+  const exportBackup = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    let backupFile: File | undefined;
+    try {
+      backupFile = await createBackupFile(data);
+      if (!(await Sharing.isAvailableAsync())) {
+        throw new Error('O compartilhamento de arquivos não está disponível neste dispositivo.');
+      }
+      await Sharing.shareAsync(backupFile.uri, {
+        dialogTitle: 'Exportar backup do Trama',
+        mimeType: 'application/json',
+      });
+      Alert.alert('Backup pronto', 'O arquivo JSON contém seus dados e as fotos dos produtos.');
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível exportar o backup',
+        error instanceof Error ? error.message : 'Tente novamente.',
+      );
+    } finally {
+      if (backupFile?.exists) {
+        try {
+          backupFile.delete();
+        } catch {
+          Alert.alert('Aviso', 'O backup foi processado, mas o arquivo temporário não pôde ser removido.');
+        }
+      }
+      setBackupBusy(false);
+    }
+  };
+
+  const importBackupFromFile = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+
+      const importedData = await readBackupFile(result.assets[0].uri);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(importedData));
+      setData(importedData);
+      setBusinessType(importedData.company?.businessType ?? 'Ateliê');
+      setCustomBusinessType(importedData.company?.customBusinessType ?? '');
+      setBusinessName(importedData.company?.name ?? '');
+      setSelectedColor(importedData.company?.baseColor ?? DEFAULT_PALETTE.green);
+      setEmployees(importedData.company?.employees ?? []);
+      setEditingCompany(false);
+      setMonth(new Date());
+      setTab('home');
+      Alert.alert('Backup importado', 'Os dados e as imagens foram restaurados neste dispositivo.');
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível importar o backup',
+        error instanceof Error ? error.message : 'Confira o arquivo e tente novamente.',
+      );
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const importBackup = () => {
+    if (backupBusy) return;
+    const hasExistingData = Boolean(data.company)
+      || data.products.length > 0
+      || data.sales.length > 0
+      || data.orders.length > 0
+      || data.expenses.length > 0
+      || data.supplies.length > 0
+      || data.offers.length > 0;
+    if (!hasExistingData) {
+      void importBackupFromFile();
+      return;
+    }
+
+    Alert.alert(
+      'Substituir os dados atuais?',
+      'A importação substituirá os dados deste dispositivo pelo conteúdo do backup.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Importar backup', style: 'destructive', onPress: () => void importBackupFromFile() },
+      ],
+    );
+  };
+
   const editCompanyProfile = () => {
     const company = data.company;
     if (!company) return;
@@ -316,7 +408,7 @@ export default function App() {
     }
   };
 
-  const saveProduct = () => {
+  const saveProduct = async () => {
     const price = parseAmount(productPrice);
     const stock = Number.parseInt(productStock, 10);
     const threshold = Number.parseInt(lowStockAt, 10);
@@ -329,14 +421,27 @@ export default function App() {
       Alert.alert('Confira a oferta', 'Informe um desconto maior que zero e, em porcentagem, de no máximo 100%.');
       return;
     }
+    const id = `p${Date.now()}`;
+    let imageUri: string | undefined;
+    if (photoUri) {
+      try {
+        imageUri = await persistProductImage(photoUri);
+      } catch (error) {
+        Alert.alert(
+          'Não foi possível salvar a foto',
+          error instanceof Error ? error.message : 'Tente escolher a imagem novamente.',
+        );
+        return;
+      }
+    }
     const product: Product = {
-      id: `p${Date.now()}`,
+      id,
       name: productName.trim(),
       category: productCategory,
       price,
       stock,
       lowStockAt: threshold,
-      imageUri: photoUri,
+      imageUri,
     };
     const initialOffer: Offer | undefined = productDiscountType === 'none'
       ? undefined
@@ -822,6 +927,12 @@ export default function App() {
         </View>
       </View>
 
+      <Text style={styles.fieldHint}>Já usa o Trama? Importe um backup JSON com seus dados e fotos.</Text>
+      <ActionButton
+        label={backupBusy ? 'Processando backup...' : 'Importar backup'}
+        onPress={importBackup}
+        compact
+      />
       <ActionButton label={editingCompany ? 'Salvar alterações' : 'Começar a usar o Trama'} onPress={saveCompanyProfile} />
       {editingCompany ? (
         <Pressable onPress={() => setEditingCompany(false)} style={styles.cancelEditButton} accessibilityRole="button">
@@ -1170,6 +1281,22 @@ export default function App() {
         <ActionButton label="+ Registrar gasto" onPress={() => openForm('expense')} secondary />
         <ActionButton label="+ Criar oferta" onPress={() => openForm('offer')} secondary />
       </View>
+      <SectionTitle title="Backup e restauração" />
+      <View style={styles.managementActions}>
+        <ActionButton
+          label={backupBusy ? 'Processando...' : 'Exportar backup'}
+          onPress={() => void exportBackup()}
+          secondary
+          compact
+        />
+        <ActionButton
+          label={backupBusy ? 'Processando...' : 'Importar backup'}
+          onPress={importBackup}
+          secondary
+          compact
+        />
+      </View>
+      <Text style={styles.fieldHint}>O backup inclui os registros e as fotos dos produtos.</Text>
       <SectionTitle title="Gastos com materiais" action="Adicionar" onPress={() => openForm('expense')} />
       <View style={styles.listCard}>
         {monthExpenses.map((expense, index) => (
