@@ -68,6 +68,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [form, setForm] = useState<FormType>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [month, setMonth] = useState(new Date());
   const [query, setQuery] = useState('');
   const [productName, setProductName] = useState('');
@@ -244,6 +245,7 @@ export default function App() {
       setOrderCartDiscounts({});
     }
     if (next === 'expense') {
+      setEditingExpenseId(null);
       setExpenseName('');
       setExpenseCategory('Matéria-prima');
       setExpenseAmount('');
@@ -264,6 +266,7 @@ export default function App() {
   const closeForm = () => {
     setForm(null);
     setEditingSaleId(null);
+    setEditingExpenseId(null);
   };
 
   const openSaleForEditing = (sale: Sale) => {
@@ -947,16 +950,56 @@ export default function App() {
       Alert.alert('Confira os dados', 'Informe a descrição e um valor maior que zero.');
       return;
     }
+    const previousExpense = editingExpenseId
+      ? data.expenses.find((expense) => expense.id === editingExpenseId)
+      : undefined;
+    if (editingExpenseId && !previousExpense) {
+      Alert.alert('Gasto não encontrado', 'Atualize a lista e tente novamente.');
+      return;
+    }
     const expense: Expense = {
-      id: `e${Date.now()}`,
-      date: localDateKey(new Date()),
+      id: previousExpense?.id ?? `e${Date.now()}`,
+      date: previousExpense?.date ?? localDateKey(new Date()),
       description: expenseName.trim(),
       category: expenseCategory,
       amount,
     };
-    setData((current) => ({ ...current, expenses: [expense, ...current.expenses] }));
-    setMonth(new Date());
+    setData((current) => ({
+      ...current,
+      expenses: previousExpense
+        ? current.expenses.map((item) => item.id === expense.id ? expense : item)
+        : [expense, ...current.expenses],
+    }));
+    if (!previousExpense) setMonth(new Date());
     closeForm();
+  };
+
+  const openExpenseForEditing = (expense: Expense) => {
+    setEditingExpenseId(expense.id);
+    setExpenseName(expense.description);
+    setExpenseCategory(expense.category);
+    setExpenseAmount(String(expense.amount));
+    setForm('expense');
+  };
+
+  const deleteExpense = (expenseId: string) => {
+    const expense = data.expenses.find((item) => item.id === expenseId);
+    if (!expense) return;
+    Alert.alert(
+      'Excluir gasto?',
+      `O registro "${expense.description}" será removido permanentemente.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => setData((current) => ({
+            ...current,
+            expenses: current.expenses.filter((item) => item.id !== expenseId),
+          })),
+        },
+      ],
+    );
   };
 
   const saveSupply = () => {
@@ -1587,13 +1630,33 @@ export default function App() {
       <SectionTitle title="Gastos com materiais" action="Adicionar" onPress={() => openForm('expense')} />
       <View style={styles.listCard}>
         {monthExpenses.map((expense, index) => (
-          <View key={expense.id} style={[styles.expenseRow, index > 0 && styles.rowDivider]}>
-            <View style={styles.expenseIcon}><Text style={styles.expenseIconText}>↙</Text></View>
-            <View style={styles.recentSaleCopy}>
-              <Text style={styles.recentSaleName}>{expense.description}</Text>
-              <Text style={styles.recentSaleDate}>{expense.category} · {formatDate(expense.date)}</Text>
+          <View key={expense.id} style={[styles.expenseEntry, index > 0 && styles.rowDivider]}>
+            <View style={styles.expenseRow}>
+              <View style={styles.expenseIcon}><Text style={styles.expenseIconText}>↙</Text></View>
+              <View style={styles.recentSaleCopy}>
+                <Text style={styles.recentSaleName}>{expense.description}</Text>
+                <Text style={styles.recentSaleDate}>{expense.category} · {formatDate(expense.date)}</Text>
+              </View>
+              <Text style={styles.expenseAmount}>− {money(expense.amount)}</Text>
             </View>
-            <Text style={styles.expenseAmount}>− {money(expense.amount)}</Text>
+            <View style={styles.saleActionsRow}>
+              <Pressable
+                onPress={() => openExpenseForEditing(expense)}
+                style={styles.saleActionButton}
+                accessibilityRole="button"
+                accessibilityLabel={`Editar gasto ${expense.description}`}
+              >
+                <Text style={styles.saleActionText}>Editar</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => deleteExpense(expense.id)}
+                style={[styles.saleActionButton, styles.saleActionDanger]}
+                accessibilityRole="button"
+                accessibilityLabel={`Excluir gasto ${expense.description}`}
+              >
+                <Text style={[styles.saleActionText, styles.saleActionDangerText]}>Excluir</Text>
+              </Pressable>
+            </View>
           </View>
         ))}
         {monthExpenses.length === 0 ? <Text style={styles.emptyText}>Nenhum gasto registrado neste mês.</Text> : null}
@@ -1652,7 +1715,7 @@ export default function App() {
   );
 
   const renderForm = () => {
-    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? editingSale ? 'Editar venda' : 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
+    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? editingSale ? 'Editar venda' : 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? editingExpenseId ? 'Editar gasto' : 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
     const canSave = form === 'product' || form === 'sale' || form === 'order' || form === 'expense' || form === 'supply' || form === 'offer';
     const supplyQuantityNumber = Number.parseInt(supplyQuantity, 10);
     const supplyDailyUseNumber = Number.parseInt(supplyDailyUse, 10);
@@ -1934,7 +1997,11 @@ export default function App() {
               ) : null}
               {form === 'expense' ? (
                 <>
-                  <Text style={styles.formIntro}>Registre compras de materiais e despesas do seu negócio.</Text>
+                  <Text style={styles.formIntro}>
+                    {editingExpenseId
+                      ? 'Atualize a descrição, categoria ou valor deste gasto.'
+                      : 'Registre compras de materiais e despesas do seu negócio.'}
+                  </Text>
                   {renderField('O que você comprou?', expenseName, setExpenseName, 'Ex.: Fios de algodão')}
                   {renderChoices('Categoria', ['Matéria-prima', 'Embalagens', 'Ferramentas', 'Outros'], expenseCategory, setExpenseCategory)}
                   {renderField('Valor da compra', expenseAmount, setExpenseAmount, '0,00', 'decimal-pad')}
@@ -1989,7 +2056,7 @@ export default function App() {
               ) : null}
               {canSave ? (
                 <ActionButton
-                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? editingSale ? 'Salvar alterações' : 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
+                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? editingSale ? 'Salvar alterações' : 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? editingExpenseId ? 'Salvar alterações' : 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
                   onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'order' ? saveOrder : form === 'expense' ? saveExpense : form === 'supply' ? saveSupply : saveOffer}
                 />
               ) : null}
