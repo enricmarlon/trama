@@ -22,6 +22,8 @@ import {
   BASE_COLORS,
   BUSINESS_TYPES,
   DEFAULT_PALETTE,
+  DEFAULT_PRODUCT_CATEGORIES,
+  DEFAULT_SUPPLY_CATEGORIES,
   initialData,
   STORAGE_KEY,
 } from './constants';
@@ -44,6 +46,7 @@ import { createStyles, ThemeContext } from './theme/ThemeContext';
 import type {
   CompanyProfile,
   CustomerOrder,
+  CategoryKind,
   Expense,
   FormType,
   Offer,
@@ -59,7 +62,29 @@ import SectionTitle from './components/SectionTitle';
 import AlertsScreen from './screens/AlertsScreen';
 import CommissionsScreen from './screens/CommissionsScreen';
 import ProductsScreen from './screens/ProductsScreen';
+import SettingsScreen from './screens/SettingsScreen';
 import { createBackupFile, persistProductImage, readBackupFile } from './backup';
+
+function normalizeStoreData(savedData: Partial<StoreData>): StoreData {
+  const products = savedData.products ?? [];
+  const supplies = savedData.supplies ?? [];
+  return {
+    ...initialData,
+    ...savedData,
+    products,
+    supplies,
+    productCategories: [...new Set([
+      ...DEFAULT_PRODUCT_CATEGORIES,
+      ...(savedData.productCategories ?? []),
+      ...products.map((product) => product.category),
+    ])],
+    supplyCategories: [...new Set([
+      ...DEFAULT_SUPPLY_CATEGORIES,
+      ...(savedData.supplyCategories ?? []),
+      ...supplies.flatMap((supply) => supply.category ? [supply.category] : []),
+    ])],
+  };
+}
 
 export default function App() {
   const [data, setData] = useState<StoreData>(initialData);
@@ -73,7 +98,7 @@ export default function App() {
   const [salesEmployeeFilter, setSalesEmployeeFilter] = useState<string[] | null>(null);
   const [query, setQuery] = useState('');
   const [productName, setProductName] = useState('');
-  const [productCategory, setProductCategory] = useState('Casa');
+  const [productCategory, setProductCategory] = useState(DEFAULT_PRODUCT_CATEGORIES[0]);
   const [productPrice, setProductPrice] = useState('');
   const [productStock, setProductStock] = useState('');
   const [lowStockAt, setLowStockAt] = useState('2');
@@ -86,6 +111,7 @@ export default function App() {
   const [expenseCategory, setExpenseCategory] = useState('Matéria-prima');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [supplyName, setSupplyName] = useState('');
+  const [supplyCategory, setSupplyCategory] = useState(DEFAULT_SUPPLY_CATEGORIES[0]);
   const [supplyQuantity, setSupplyQuantity] = useState('');
   const [supplyDailyUse, setSupplyDailyUse] = useState('');
   const [offerProductId, setOfferProductId] = useState('');
@@ -148,12 +174,7 @@ export default function App() {
             }, 0);
             return { ...order, items, total, savings };
           });
-          setData({
-            ...initialData,
-            ...savedData,
-            orders: migratedOrders,
-            supplies: savedData.supplies ?? [],
-          });
+          setData(normalizeStoreData({ ...savedData, orders: migratedOrders }));
         }
       })
       .catch(() => {
@@ -175,6 +196,8 @@ export default function App() {
   }, [data, loaded]);
 
   const activeOffers = useMemo(() => data.offers.filter((offer) => offer.active), [data.offers]);
+  const productCategoryOptions = data.productCategories ?? DEFAULT_PRODUCT_CATEGORIES;
+  const supplyCategoryOptions = data.supplyCategories ?? DEFAULT_SUPPLY_CATEGORIES;
   const offerFor = (productId: string) => activeOffers.find((offer) => offer.productId === productId);
   const priceFor = (product: Product) => {
     const offer = offerFor(product.id);
@@ -234,7 +257,7 @@ export default function App() {
     setForm(next);
     if (next === 'product') {
       setProductName('');
-      setProductCategory('Casa');
+      setProductCategory(productCategoryOptions[0] ?? '');
       setProductPrice('');
       setProductStock('');
       setLowStockAt('2');
@@ -266,6 +289,7 @@ export default function App() {
     }
     if (next === 'supply') {
       setSupplyName('');
+      setSupplyCategory(supplyCategoryOptions[0] ?? '');
       setSupplyQuantity('');
       setSupplyDailyUse('');
     }
@@ -323,6 +347,201 @@ export default function App() {
     }
     setEmployees((current) => [...current, name]);
     setEmployeeDraft('');
+  };
+
+  const addManagedCategory = (kind: CategoryKind, value: string) => {
+    const name = value.trim();
+    const categories = kind === 'product' ? productCategoryOptions : supplyCategoryOptions;
+    if (!name) {
+      Alert.alert('Informe a categoria', 'Digite um nome antes de adicionar.');
+      return false;
+    }
+    if (categories.some((category) => category.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      Alert.alert('Categoria já cadastrada', 'Use um nome diferente ou edite a categoria existente.');
+      return false;
+    }
+    setData((current) => kind === 'product'
+      ? { ...current, productCategories: [...(current.productCategories ?? DEFAULT_PRODUCT_CATEGORIES), name] }
+      : { ...current, supplyCategories: [...(current.supplyCategories ?? DEFAULT_SUPPLY_CATEGORIES), name] });
+    return true;
+  };
+
+  const renameManagedCategory = (kind: CategoryKind, oldName: string, value: string) => {
+    const name = value.trim();
+    const categories = kind === 'product' ? productCategoryOptions : supplyCategoryOptions;
+    if (!name) {
+      Alert.alert('Informe a categoria', 'O nome da categoria não pode ficar vazio.');
+      return false;
+    }
+    if (categories.some((category) => category !== oldName && category.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      Alert.alert('Categoria já cadastrada', 'Use um nome diferente ou edite a categoria existente.');
+      return false;
+    }
+    if (name === oldName) return true;
+
+    setData((current) => kind === 'product'
+      ? {
+        ...current,
+        productCategories: (current.productCategories ?? DEFAULT_PRODUCT_CATEGORIES)
+          .map((category) => category === oldName ? name : category),
+        products: current.products.map((product) =>
+          product.category === oldName ? { ...product, category: name } : product),
+      }
+      : {
+        ...current,
+        supplyCategories: (current.supplyCategories ?? DEFAULT_SUPPLY_CATEGORIES)
+          .map((category) => category === oldName ? name : category),
+        supplies: current.supplies.map((supply) =>
+          supply.category === oldName ? { ...supply, category: name } : supply),
+      });
+    if (kind === 'product') {
+      setProductCategory((current) => current === oldName ? name : current);
+    } else {
+      setSupplyCategory((current) => current === oldName ? name : current);
+    }
+    return true;
+  };
+
+  const removeManagedCategory = (kind: CategoryKind, name: string) => {
+    const categories = kind === 'product' ? productCategoryOptions : supplyCategoryOptions;
+    if (categories.length <= 1) {
+      Alert.alert('Mantenha uma categoria', 'É necessário ter ao menos uma categoria para cadastrar itens.');
+      return;
+    }
+    const replacement = categories.find((category) => category !== name);
+    if (!replacement) return;
+    const affectedCount = kind === 'product'
+      ? data.products.filter((product) => product.category === name).length
+      : data.supplies.filter((supply) => supply.category === name).length;
+    const affectedLabel = kind === 'product' ? 'produto(s)' : 'insumo(s)';
+
+    Alert.alert(
+      'Remover categoria?',
+      affectedCount > 0
+        ? `${affectedCount} ${affectedLabel} desta categoria serão movidos para "${replacement}".`
+        : `A categoria "${name}" será removida.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: () => {
+            setData((current) => kind === 'product'
+              ? {
+                ...current,
+                productCategories: (current.productCategories ?? DEFAULT_PRODUCT_CATEGORIES)
+                  .filter((category) => category !== name),
+                products: current.products.map((product) =>
+                  product.category === name ? { ...product, category: replacement } : product),
+              }
+              : {
+                ...current,
+                supplyCategories: (current.supplyCategories ?? DEFAULT_SUPPLY_CATEGORIES)
+                  .filter((category) => category !== name),
+                supplies: current.supplies.map((supply) =>
+                  supply.category === name ? { ...supply, category: replacement } : supply),
+              });
+            if (kind === 'product') {
+              setProductCategory((current) => current === name ? replacement : current);
+            } else {
+              setSupplyCategory((current) => current === name ? replacement : current);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const addManagedEmployee = (value: string) => {
+    const name = value.trim();
+    const currentEmployees = data.company?.employees ?? [];
+    if (!name) {
+      Alert.alert('Informe o funcionário', 'Digite um nome antes de adicionar.');
+      return false;
+    }
+    if (currentEmployees.some((employee) => employee.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      Alert.alert('Funcionário já cadastrado', 'Use um nome diferente ou edite o funcionário existente.');
+      return false;
+    }
+    const nextEmployees = [...currentEmployees, name];
+    setEmployees(nextEmployees);
+    setData((current) => current.company
+      ? { ...current, company: { ...current.company, employees: nextEmployees } }
+      : current);
+    return true;
+  };
+
+  const renameManagedEmployee = (oldName: string, value: string) => {
+    const name = value.trim();
+    const currentEmployees = data.company?.employees ?? [];
+    if (!name) {
+      Alert.alert('Informe o funcionário', 'O nome do funcionário não pode ficar vazio.');
+      return false;
+    }
+    if (currentEmployees.some((employee) => employee !== oldName && employee.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      Alert.alert('Funcionário já cadastrado', 'Use um nome diferente ou edite o funcionário existente.');
+      return false;
+    }
+    if (name === oldName) return true;
+    const nextEmployees = currentEmployees.map((employee) => employee === oldName ? name : employee);
+    setEmployees(nextEmployees);
+    setData((current) => ({
+      ...current,
+      company: current.company ? { ...current.company, employees: nextEmployees } : current.company,
+      products: current.products.map((product) =>
+        product.makerEmployee === oldName ? { ...product, makerEmployee: name } : product),
+      sales: current.sales.map((sale) => ({
+        ...sale,
+        employeeName: sale.employeeName === oldName ? name : sale.employeeName,
+        items: sale.items.map((item) =>
+          item.commissionEmployee === oldName ? { ...item, commissionEmployee: name } : item),
+      })),
+      orders: current.orders.map((order) => ({
+        ...order,
+        items: order.items.map((item) =>
+          item.commissionEmployee === oldName ? { ...item, commissionEmployee: name } : item),
+      })),
+    }));
+    return true;
+  };
+
+  const removeManagedEmployee = (name: string) => {
+    Alert.alert(
+      'Remover funcionário?',
+      `As referências atuais de "${name}" serão removidas. Vendas e comissões já registradas serão mantidas no histórico.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: () => {
+            const nextEmployees = (data.company?.employees ?? []).filter((employee) => employee !== name);
+            setEmployees(nextEmployees);
+            setData((current) => ({
+              ...current,
+              company: current.company ? { ...current.company, employees: nextEmployees } : current.company,
+              products: current.products.map((product) =>
+                product.makerEmployee === name
+                  ? { ...product, makerEmployee: undefined, commissionPercent: 0 }
+                  : product),
+              orders: current.orders.map((order) => order.status === 'pending'
+                ? {
+                  ...order,
+                  items: order.items.map((item) => item.commissionEmployee === name
+                    ? {
+                      ...item,
+                      commissionEmployee: undefined,
+                      commissionPercent: undefined,
+                      commissionAmount: undefined,
+                    }
+                    : item),
+                }
+                : order),
+            }));
+          },
+        },
+      ],
+    );
   };
 
   const saveCompanyProfile = () => {
@@ -388,7 +607,7 @@ export default function App() {
       });
       if (result.canceled) return;
 
-      const importedData = await readBackupFile(result.assets[0].uri);
+      const importedData = normalizeStoreData(await readBackupFile(result.assets[0].uri));
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(importedData));
       setData(importedData);
       setBusinessType(importedData.company?.businessType ?? 'Ateliê');
@@ -1026,6 +1245,7 @@ export default function App() {
     const supply: Supply = {
       id: `i${Date.now()}`,
       name: supplyName.trim(),
+      category: supplyCategory,
       quantity,
       dailyUse,
       registeredDate: localDateKey(new Date()),
@@ -1278,12 +1498,11 @@ export default function App() {
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${lowStockCount + alertingOrders.length} alertas`}
-        onPress={() => setTab('alerts')}
+        accessibilityLabel="Configurações"
+        onPress={() => setTab('settings')}
         style={styles.notificationButton}
       >
-        <Text style={styles.notificationIcon}>♧</Text>
-        {lowStockCount + alertingOrders.length > 0 ? <View style={styles.notificationDot} /> : null}
+        <Text style={styles.notificationIcon}>⚙</Text>
       </Pressable>
     </View>
   );
@@ -1610,6 +1829,7 @@ export default function App() {
             <View key={supply.id} style={[styles.supplyRow, index > 0 && styles.rowDivider]}>
               <View style={styles.supplyIcon}><Text style={styles.supplyIconText}>▤</Text></View>
               <View style={styles.recentSaleCopy}>
+                <Text style={styles.productCategory}>{(supply.category ?? 'Sem categoria').toUpperCase()}</Text>
                 <Text style={styles.recentSaleName}>{supply.name}</Text>
                 <Text style={[styles.recentSaleDate, low && styles.stockLabelLow]}>
                   {quantity} unidade(s) · {daysRemaining} {daysRemaining === 1 ? 'dia restante' : 'dias restantes'}
@@ -1822,7 +2042,7 @@ export default function App() {
                     </Pressable>
                   </View>
                   {renderField('Nome do produto', productName, setProductName, 'Ex.: Caneca de cerâmica')}
-                  {renderChoices('Categoria', ['Casa', 'Cerâmica', 'Têxtil', 'Acessórios'], productCategory, setProductCategory)}
+                  {renderChoices('Categoria', productCategoryOptions, productCategory, setProductCategory)}
                   <View style={styles.formColumns}>
                     <View style={styles.formColumn}>{renderField('Preço de venda', productPrice, setProductPrice, '0,00', 'decimal-pad')}</View>
                     <View style={styles.formColumn}>{renderField('Quantidade', productStock, setProductStock, '0', 'number-pad')}</View>
@@ -2070,6 +2290,7 @@ export default function App() {
                 <>
                   <Text style={styles.formIntro}>Acompanhe o estoque e a duração estimada de cada material.</Text>
                   {renderField('Nome do insumo', supplyName, setSupplyName, 'Ex.: Linha de algodão')}
+                  {renderChoices('Categoria', supplyCategoryOptions, supplyCategory, setSupplyCategory)}
                   <View style={styles.formColumns}>
                     <View style={styles.formColumn}>{renderField('Quantidade disponível', supplyQuantity, setSupplyQuantity, '10', 'number-pad')}</View>
                     <View style={styles.formColumn}>{renderField('Consumo por dia', supplyDailyUse, setSupplyDailyUse, '2', 'number-pad')}</View>
@@ -2185,6 +2406,19 @@ export default function App() {
                   />
                 ) : null}
                 {tab === 'management' ? renderManagement() : null}
+                {tab === 'settings' ? (
+                  <SettingsScreen
+                    productCategories={productCategoryOptions}
+                    supplyCategories={supplyCategoryOptions}
+                    employees={data.company?.employees ?? []}
+                    onAddCategory={addManagedCategory}
+                    onRenameCategory={renameManagedCategory}
+                    onRemoveCategory={removeManagedCategory}
+                    onAddEmployee={addManagedEmployee}
+                    onRenameEmployee={renameManagedEmployee}
+                    onRemoveEmployee={removeManagedEmployee}
+                  />
+                ) : null}
               </ScrollView>
               <SafeAreaView edges={['bottom']} style={styles.bottomSafeArea}>
                 <View style={styles.bottomNavigation}>
@@ -2196,6 +2430,9 @@ export default function App() {
                         <Text style={[styles.navLabel, selected && styles.navLabelSelected, item.key === 'commissions' && styles.navLabelCompact]}>
                           {item.label}
                         </Text>
+                        {item.key === 'alerts' && lowStockCount + alertingOrders.length > 0
+                          ? <View style={styles.navNotificationDot} />
+                          : null}
                         {selected ? <View style={styles.navIndicator} /> : null}
                       </Pressable>
                     );

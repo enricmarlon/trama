@@ -68,6 +68,7 @@ export type Expense = {
 export type Supply = {
   id: string;
   name: string;
+  category?: string;
   quantity: number;
   dailyUse: number;
   registeredDate: string;
@@ -89,6 +90,8 @@ export type StoreData = {
   expenses: Expense[];
   supplies: Supply[];
   offers: Offer[];
+  productCategories?: string[];
+  supplyCategories?: string[];
   company?: CompanyProfile;
 };
 
@@ -119,5 +122,6 @@ export type Palette = {
   canvasShade: string;
 };
 
-export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'alerts' | 'commissions' | 'management';
+export type CategoryKind = 'product' | 'supply';
+export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'alerts' | 'commissions' | 'management' | 'settings';
 export type FormType = 'product' | 'sale' | 'order' | 'expense' | 'supply' | 'offer' | null;

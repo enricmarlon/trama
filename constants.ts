@@ -30,6 +30,9 @@ export const BASE_COLORS = [
   { name: 'Laranja', value: '#AA6031' },
 ];
 
+export const DEFAULT_PRODUCT_CATEGORIES = ['Casa', 'Cerâmica', 'Têxtil', 'Acessórios'];
+export const DEFAULT_SUPPLY_CATEGORIES = ['Matéria-prima', 'Embalagens', 'Ferramentas', 'Outros'];
+
 export const DEFAULT_PALETTE = createPalette(BASE_COLORS[1].value);
 
 export const initialData: StoreData = {
@@ -39,4 +42,6 @@ export const initialData: StoreData = {
   expenses: [],
   supplies: [],
   offers: [],
+  productCategories: DEFAULT_PRODUCT_CATEGORIES,
+  supplyCategories: DEFAULT_SUPPLY_CATEGORIES,
 };

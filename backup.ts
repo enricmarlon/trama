@@ -120,6 +120,7 @@ function isSupply(value: unknown): value is Supply {
   return isRecord(value)
     && isString(value.id)
     && isString(value.name)
+    && isOptionalString(value.category)
     && isFiniteNumber(value.quantity)
     && isFiniteNumber(value.dailyUse)
     && isString(value.registeredDate);
@@ -159,6 +160,8 @@ function isStoreData(value: unknown): value is StoreData {
     && value.supplies.every(isSupply)
     && Array.isArray(value.offers)
     && value.offers.every(isOffer)
+    && (value.productCategories === undefined || (Array.isArray(value.productCategories) && value.productCategories.every(isString)))
+    && (value.supplyCategories === undefined || (Array.isArray(value.supplyCategories) && value.supplyCategories.every(isString)))
     && (value.company === undefined || isCompanyProfile(value.company));
 }
 
