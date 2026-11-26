@@ -19,11 +19,24 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   BASE_COLORS,
   BUSINESS_TYPES,
-  createPalette,
   DEFAULT_PALETTE,
   initialData,
   STORAGE_KEY,
 } from './constants';
+import {
+  availableSupplyQuantity,
+  createPalette,
+  dateDifferenceInDays,
+  deliveryCountdown,
+  formatDate,
+  formatLongDate,
+  localDateKey,
+  money,
+  parseAmount,
+  parseDeliveryDate,
+  sameMonth,
+  supplyDaysRemaining,
+} from './utils';
 import type {
   CompanyProfile,
   CustomerOrder,
@@ -38,77 +51,6 @@ import type {
   Tab,
   ThemeContextValue,
 } from './types';
-
-const money = (value: number) =>
-  value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-function localDateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function dateDifferenceInDays(startDate: string, endDate: string) {
-  const toUtcDay = (value: string) => {
-    const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-    return Date.UTC(year, month - 1, day);
-  };
-  return Math.round((toUtcDay(endDate) - toUtcDay(startDate)) / 86_400_000);
-}
-
-function elapsedDays(startDate: string, endDate: string) {
-  return Math.max(0, dateDifferenceInDays(startDate, endDate));
-}
-
-function parseDeliveryDate(value: string) {
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
-  if (!match) return null;
-  const [, dayText, monthText, yearText] = match;
-  const day = Number(dayText);
-  const month = Number(monthText);
-  const year = Number(yearText);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
-  return `${yearText}-${monthText}-${dayText}`;
-}
-
-function deliveryCountdown(days: number) {
-  if (days > 1) return `Faltam ${days} dias para a entrega`;
-  if (days === 1) return 'Falta 1 dia para a entrega';
-  if (days === 0) return 'Entrega hoje';
-  const overdueDays = Math.abs(days);
-  return `Atrasado há ${overdueDays} ${overdueDays === 1 ? 'dia' : 'dias'}`;
-}
-
-function availableSupplyQuantity(supply: Supply, today: string) {
-  return Math.max(0, supply.quantity - elapsedDays(supply.registeredDate, today) * supply.dailyUse);
-}
-
-function supplyDaysRemaining(dailyUse: number, quantity: number) {
-  return quantity > 0 && dailyUse > 0 ? Math.ceil(quantity / dailyUse) : 0;
-}
-
-const parseAmount = (value: string) => {
-  const trimmed = value.trim();
-  const normalized = trimmed.includes(',')
-    ? trimmed.replace(/\./g, '').replace(',', '.')
-    : trimmed;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const formatDate = (value: string) =>
-  new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
-
-const formatLongDate = (value: string) =>
-  new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
-
-const sameMonth = (date: string, month: Date) => {
-  const [year, monthNumber] = date.slice(0, 10).split('-').map(Number);
-  return year === month.getFullYear() && monthNumber === month.getMonth() + 1;
-};
 
 function ActionButton({
   label,
