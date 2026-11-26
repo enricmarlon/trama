@@ -914,6 +914,33 @@ export default function App() {
     }));
   };
 
+  const undoCommissionPayment = (saleId: string, itemIndex: number) => {
+    Alert.alert(
+        'Desfazer pagamento?',
+        'A comissão voltará para pendente e a venda poderá ser editada novamente.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Desfazer pagamento',
+            style: 'destructive',
+            onPress: () => setData((current) => ({
+              ...current,
+              sales: current.sales.map((sale) => sale.id !== saleId
+                ? sale
+                : {
+                  ...sale,
+                  items: sale.items.map((item, index) =>
+                    index === itemIndex && item.commissionPaidDate
+                      ? { ...item, commissionPaidDate: undefined }
+                      : item,
+                  ),
+                }),
+            })),
+          },
+        ],
+    );
+  };
+
   const saveExpense = () => {
     const amount = parseAmount(expenseAmount);
     if (!expenseName.trim() || amount <= 0) {
@@ -2014,7 +2041,11 @@ export default function App() {
                 ) : null}
                 {tab === 'sales' ? renderSales() : null}
                 {tab === 'commissions' ? (
-                  <CommissionsScreen sales={data.sales} onMarkPaid={markCommissionPaid} />
+                  <CommissionsScreen
+                    sales={data.sales}
+                    onMarkPaid={markCommissionPaid}
+                    onUndoPaid={undoCommissionPayment}
+                  />
                 ) : null}
                 {tab === 'orders' ? renderOrders() : null}
                 {tab === 'supplies' ? renderSupplies() : null}

@@ -15,13 +15,14 @@ type CommissionEntry = {
 type CommissionsScreenProps = {
   sales: Sale[];
   onMarkPaid: (saleId: string, itemIndex: number) => void;
+  onUndoPaid: (saleId: string, itemIndex: number) => void;
 };
 
 function entryKey(entry: CommissionEntry) {
   return `${entry.sale.id}:${entry.itemIndex}`;
 }
 
-export default function CommissionsScreen({ sales, onMarkPaid }: CommissionsScreenProps) {
+export default function CommissionsScreen({ sales, onMarkPaid, onUndoPaid }: CommissionsScreenProps) {
   const { styles } = useContext(ThemeContext);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const entries = sales.flatMap((sale) => sale.items
@@ -124,6 +125,14 @@ export default function CommissionsScreen({ sales, onMarkPaid }: CommissionsScre
             <Text style={styles.orderStatusDelivered}>
               Paga em {entry.item.commissionPaidDate ? formatNumericDate(entry.item.commissionPaidDate) : ''}
             </Text>
+            <Pressable
+              onPress={() => onUndoPaid(entry.sale.id, entry.itemIndex)}
+              style={styles.orderUndoButton}
+              accessibilityRole="button"
+              accessibilityLabel={`Desfazer pagamento da comissão de ${entry.item.name}`}
+            >
+              <Text style={styles.orderUndoText}>Desfazer pagamento</Text>
+            </Pressable>
           </View>
         ))}
         {paidEntries.length === 0 ? <Text style={styles.emptyText}>Nenhuma comissão marcada como paga.</Text> : null}
