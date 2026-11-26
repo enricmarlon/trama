@@ -9,13 +9,13 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 type Product = {
   id: string;
@@ -1145,45 +1145,52 @@ export default function App() {
 
   return (
     <ThemeContext.Provider value={theme}>
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="dark" />
-        {!loaded ? (
-          <View style={styles.loadingScreen}>
-            <View style={styles.brandMark}><Text style={styles.brandMarkText}>t.</Text></View>
-            <Text style={styles.loadingText}>Preparando seu espaço...</Text>
-          </View>
-        ) : !data.company || editingCompany ? (
-          renderCompanySetup()
-        ) : (
-          <>
-            {renderHeader()}
-            <ScrollView
-              style={styles.screen}
-              contentContainerStyle={styles.screenContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {tab === 'home' ? renderHome() : null}
-              {tab === 'products' ? renderProducts() : null}
-              {tab === 'sales' ? renderSales() : null}
-              {tab === 'management' ? renderManagement() : null}
-            </ScrollView>
-            <View style={styles.bottomNavigation}>
-              {tabItems.map((item) => {
-                const selected = tab === item.key;
-                return (
-                  <Pressable key={item.key} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setTab(item.key)} style={styles.navItem}>
-                    <Text style={[styles.navIcon, selected && styles.navIconSelected]}>{item.icon}</Text>
-                    <Text style={[styles.navLabel, selected && styles.navLabelSelected]}>{item.label}</Text>
-                    {selected ? <View style={styles.navIndicator} /> : null}
-                  </Pressable>
-                );
-              })}
+      <SafeAreaProvider>
+        <SafeAreaView
+          style={styles.safeArea}
+          edges={loaded && data.company && !editingCompany ? ['top', 'left', 'right'] : ['top', 'left', 'right', 'bottom']}
+        >
+          <StatusBar style="dark" />
+          {!loaded ? (
+            <View style={styles.loadingScreen}>
+              <View style={styles.brandMark}><Text style={styles.brandMarkText}>t.</Text></View>
+              <Text style={styles.loadingText}>Preparando seu espaço...</Text>
             </View>
-            {renderForm()}
-          </>
-        )}
-      </SafeAreaView>
+          ) : !data.company || editingCompany ? (
+            renderCompanySetup()
+          ) : (
+            <>
+              {renderHeader()}
+              <ScrollView
+                style={styles.screen}
+                contentContainerStyle={styles.screenContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {tab === 'home' ? renderHome() : null}
+                {tab === 'products' ? renderProducts() : null}
+                {tab === 'sales' ? renderSales() : null}
+                {tab === 'management' ? renderManagement() : null}
+              </ScrollView>
+              <SafeAreaView edges={['bottom']} style={styles.bottomSafeArea}>
+                <View style={styles.bottomNavigation}>
+                  {tabItems.map((item) => {
+                    const selected = tab === item.key;
+                    return (
+                      <Pressable key={item.key} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setTab(item.key)} style={styles.navItem}>
+                        <Text style={[styles.navIcon, selected && styles.navIconSelected]}>{item.icon}</Text>
+                        <Text style={[styles.navLabel, selected && styles.navLabelSelected]}>{item.label}</Text>
+                        {selected ? <View style={styles.navIndicator} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </SafeAreaView>
+              {renderForm()}
+            </>
+          )}
+        </SafeAreaView>
+      </SafeAreaProvider>
     </ThemeContext.Provider>
   );
 }
@@ -1279,6 +1286,7 @@ function createStyles(COLORS: Palette) {
   rowDivider: { borderTopWidth: 1, borderTopColor: COLORS.border },
   emptyText: { color: COLORS.muted, textAlign: 'center', fontSize: 12, paddingVertical: 22 },
   bottomSpacer: { height: 20 },
+  bottomSafeArea: { backgroundColor: COLORS.white },
   bottomNavigation: { minHeight: 66, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: COLORS.border, flexDirection: 'row', justifyContent: 'space-around', paddingTop: 7, paddingBottom: Platform.OS === 'android' ? 6 : 1 },
   navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, position: 'relative' },
   navIcon: { color: COLORS.muted, fontSize: 19, lineHeight: 23 },
