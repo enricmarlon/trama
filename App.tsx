@@ -44,6 +44,23 @@ type Sale = {
   employeeName?: string;
 };
 
+type CustomerOrderItem = {
+  productId: string;
+  name: string;
+  quantity: number;
+};
+
+type CustomerOrder = {
+  id: string;
+  customerName: string;
+  phone: string;
+  createdDate: string;
+  deliveryDate: string;
+  alertDays?: number;
+  items: CustomerOrderItem[];
+  status: 'pending' | 'delivered';
+};
+
 type Expense = {
   id: string;
   date: string;
@@ -72,6 +89,7 @@ type Offer = {
 type StoreData = {
   products: Product[];
   sales: Sale[];
+  orders: CustomerOrder[];
   expenses: Expense[];
   supplies: Supply[];
   offers: Offer[];
@@ -105,8 +123,8 @@ type Palette = {
   canvasShade: string;
 };
 
-type Tab = 'home' | 'products' | 'sales' | 'supplies' | 'management';
-type FormType = 'product' | 'sale' | 'expense' | 'supply' | 'offer' | null;
+type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'management';
+type FormType = 'product' | 'sale' | 'order' | 'expense' | 'supply' | 'offer' | null;
 
 const STORAGE_KEY = '@trama/store-data-v1';
 const BUSINESS_TYPES = [
@@ -205,7 +223,7 @@ function createPalette(primary: string): Palette {
 
 const DEFAULT_PALETTE = createPalette(BASE_COLORS[1].value);
 
-const initialData: StoreData = { products: [], sales: [], expenses: [], supplies: [], offers: [] };
+const initialData: StoreData = { products: [], sales: [], orders: [], expenses: [], supplies: [], offers: [] };
 
 const money = (value: number) =>
   value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -214,12 +232,36 @@ function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function elapsedDays(startDate: string, endDate: string) {
+function dateDifferenceInDays(startDate: string, endDate: string) {
   const toUtcDay = (value: string) => {
     const [year, month, day] = value.slice(0, 10).split('-').map(Number);
     return Date.UTC(year, month - 1, day);
   };
-  return Math.max(0, Math.floor((toUtcDay(endDate) - toUtcDay(startDate)) / 86_400_000));
+  return Math.round((toUtcDay(endDate) - toUtcDay(startDate)) / 86_400_000);
+}
+
+function elapsedDays(startDate: string, endDate: string) {
+  return Math.max(0, dateDifferenceInDays(startDate, endDate));
+}
+
+function parseDeliveryDate(value: string) {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const [, dayText, monthText, yearText] = match;
+  const day = Number(dayText);
+  const month = Number(monthText);
+  const year = Number(yearText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return `${yearText}-${monthText}-${dayText}`;
+}
+
+function deliveryCountdown(days: number) {
+  if (days > 1) return `Faltam ${days} dias para a entrega`;
+  if (days === 1) return 'Falta 1 dia para a entrega';
+  if (days === 0) return 'Entrega hoje';
+  const overdueDays = Math.abs(days);
+  return `Atrasado há ${overdueDays} ${overdueDays === 1 ? 'dia' : 'dias'}`;
 }
 
 function availableSupplyQuantity(supply: Supply, today: string) {
@@ -241,6 +283,13 @@ const parseAmount = (value: string) => {
 
 const formatDate = (value: string) =>
   new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+
+const formatLongDate = (value: string) =>
+  new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
 
 const sameMonth = (date: string, month: Date) => {
   const [year, monthNumber] = date.slice(0, 10).split('-').map(Number);
@@ -326,6 +375,11 @@ export default function App() {
   const [discountValue, setDiscountValue] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [cartDiscounts, setCartDiscounts] = useState<Record<string, string>>({});
+  const [orderCustomerName, setOrderCustomerName] = useState('');
+  const [orderPhone, setOrderPhone] = useState('');
+  const [orderDeliveryDate, setOrderDeliveryDate] = useState('');
+  const [orderAlertDays, setOrderAlertDays] = useState('');
+  const [orderCart, setOrderCart] = useState<Record<string, number>>({});
   const [businessType, setBusinessType] = useState('Ateliê');
   const [customBusinessType, setCustomBusinessType] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -346,7 +400,7 @@ export default function App() {
       .then((saved) => {
         if (saved && active) {
           const savedData = JSON.parse(saved) as Partial<StoreData>;
-          setData({ ...initialData, ...savedData, supplies: savedData.supplies ?? [] });
+          setData({ ...initialData, ...savedData, orders: savedData.orders ?? [], supplies: savedData.supplies ?? [] });
         }
       })
       .catch(() => {
@@ -398,6 +452,10 @@ export default function App() {
   }));
   const lowStockSupplies = suppliesWithStock.filter(({ quantity }) => quantity < 2);
   const lowStockCount = lowStockProducts.length + lowStockSupplies.length;
+  const pendingOrders = data.orders.filter((order) => order.status === 'pending');
+  const alertingOrders = pendingOrders.filter((order) =>
+    order.alertDays !== undefined && dateDifferenceInDays(today, order.deliveryDate) <= order.alertDays,
+  );
   const visibleProducts = data.products.filter((product) => product.name.toLowerCase().includes(query.toLowerCase()));
   const monthLabel = month.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
@@ -417,6 +475,13 @@ export default function App() {
       setCart({});
       setCartDiscounts({});
       setSelectedEmployee('');
+    }
+    if (next === 'order') {
+      setOrderCustomerName('');
+      setOrderPhone('');
+      setOrderDeliveryDate('');
+      setOrderAlertDays('');
+      setOrderCart({});
     }
     if (next === 'expense') {
       setExpenseName('');
@@ -609,6 +674,60 @@ export default function App() {
     closeForm();
   };
 
+  const saveOrder = () => {
+    const customerName = orderCustomerName.trim();
+    const phone = orderPhone.trim();
+    const deliveryDate = parseDeliveryDate(orderDeliveryDate);
+    const hasAlertDays = orderAlertDays.trim() !== '';
+    const alertDays = hasAlertDays ? Number(orderAlertDays) : undefined;
+    const items = data.products
+      .filter((product) => (orderCart[product.id] ?? 0) > 0)
+      .map((product) => ({
+        productId: product.id,
+        name: product.name,
+        quantity: orderCart[product.id],
+      }));
+
+    if (!customerName || !phone || !deliveryDate) {
+      Alert.alert('Confira os dados do pedido', 'Informe o nome, o telefone do cliente e uma data válida para a entrega.');
+      return;
+    }
+    if (dateDifferenceInDays(today, deliveryDate) < 0) {
+      Alert.alert('Data de entrega inválida', 'A data de entrega deve ser hoje ou uma data futura.');
+      return;
+    }
+    if (hasAlertDays && (!Number.isInteger(alertDays) || (alertDays ?? -1) < 0)) {
+      Alert.alert('Prazo de alerta inválido', 'Informe uma quantidade de dias inteira igual ou maior que zero, ou deixe o campo vazio.');
+      return;
+    }
+    if (items.length === 0) {
+      Alert.alert('Pedido sem produtos', 'Selecione ao menos um produto para registrar o pedido.');
+      return;
+    }
+
+    const order: CustomerOrder = {
+      id: `r${today}-${data.orders.length + 1}`,
+      customerName,
+      phone,
+      createdDate: today,
+      deliveryDate,
+      ...(alertDays !== undefined ? { alertDays } : {}),
+      items,
+      status: 'pending',
+    };
+    setData((current) => ({ ...current, orders: [order, ...current.orders] }));
+    closeForm();
+  };
+
+  const markOrderDelivered = (orderId: string) => {
+    setData((current) => ({
+      ...current,
+      orders: current.orders.map((order) =>
+        order.id === orderId ? { ...order, status: 'delivered' } : order,
+      ),
+    }));
+  };
+
   const saveExpense = () => {
     const amount = parseAmount(expenseAmount);
     if (!expenseName.trim() || amount <= 0) {
@@ -727,6 +846,7 @@ export default function App() {
     { key: 'home', icon: '⌂', label: 'Início' },
     { key: 'products', icon: '▦', label: 'Produtos' },
     { key: 'sales', icon: '↗', label: 'Vendas' },
+    { key: 'orders', icon: '▣', label: 'Pedidos' },
     { key: 'supplies', icon: '▤', label: 'Insumos' },
     { key: 'management', icon: '☷', label: 'Gestão' },
   ];
@@ -880,12 +1000,14 @@ export default function App() {
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${lowStockCount} alertas de estoque`}
-        onPress={() => setTab(lowStockSupplies.length > 0 ? 'supplies' : 'products')}
+        accessibilityLabel={`${lowStockCount + alertingOrders.length} alertas`}
+        onPress={() => setTab(
+          alertingOrders.length > 0 ? 'orders' : lowStockSupplies.length > 0 ? 'supplies' : 'products',
+        )}
         style={styles.notificationButton}
       >
         <Text style={styles.notificationIcon}>♧</Text>
-        {lowStockCount > 0 ? <View style={styles.notificationDot} /> : null}
+        {lowStockCount + alertingOrders.length > 0 ? <View style={styles.notificationDot} /> : null}
       </Pressable>
     </View>
   );
@@ -958,6 +1080,17 @@ export default function App() {
           <View style={styles.alertCopy}>
             <Text style={styles.alertTitle}>Insumos com estoque baixo</Text>
             <Text style={styles.alertText}>{lowStockSupplies.length} insumo(s) com menos de 2 unidades</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
+      ) : null}
+
+      {alertingOrders.length > 0 ? (
+        <Pressable style={styles.stockAlert} onPress={() => setTab('orders')}>
+          <View style={styles.alertIcon}><Text style={styles.alertIconText}>!</Text></View>
+          <View style={styles.alertCopy}>
+            <Text style={styles.alertTitle}>Entrega de pedidos se aproximando</Text>
+            <Text style={styles.alertText}>{alertingOrders.length} pedido(s) dentro do prazo de alerta</Text>
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
@@ -1063,7 +1196,7 @@ export default function App() {
     <>
       <Text style={styles.pageEyebrow}>MOVIMENTO DO NEGÓCIO</Text>
       <View style={styles.pageHeadingRow}>
-        <View><Text style={styles.pageTitle}>Vendas</Text><Text style={styles.pageSubtitle}>Acompanhe cada encomenda</Text></View>
+        <View><Text style={styles.pageTitle}>Vendas</Text><Text style={styles.pageSubtitle}>Registre vendas e acompanhe resultados</Text></View>
         <ActionButton label="+ Nova venda" onPress={() => openForm('sale')} compact />
       </View>
       <View style={styles.monthSelector}>
@@ -1093,6 +1226,68 @@ export default function App() {
           </View>
         ))}
         {monthSales.length === 0 ? <Text style={styles.emptyText}>Nenhuma venda neste mês.</Text> : null}
+      </View>
+      <View style={styles.bottomSpacer} />
+    </>
+  );
+
+  const renderOrders = () => (
+    <>
+      <Text style={styles.pageEyebrow}>ACOMPANHAMENTO DE ENTREGAS</Text>
+      <View style={styles.pageHeadingRow}>
+        <View>
+          <Text style={styles.pageTitle}>Pedidos</Text>
+          <Text style={styles.pageSubtitle}>{pendingOrders.length} pendentes · {data.orders.length} cadastrados</Text>
+        </View>
+        <ActionButton label="+ Novo pedido" onPress={() => openForm('order')} compact />
+      </View>
+      {alertingOrders.length > 0 ? (
+        <View style={styles.inventoryNotice}>
+          <Text style={styles.inventoryNoticeIcon}>!</Text>
+          <Text style={styles.inventoryNoticeText}>{alertingOrders.length} pedido(s) dentro do prazo de alerta</Text>
+        </View>
+      ) : null}
+      <View style={styles.listCard}>
+        {data.orders.map((order, index) => {
+          const daysUntilDelivery = dateDifferenceInDays(today, order.deliveryDate);
+          const shouldAlert = order.status === 'pending'
+            && order.alertDays !== undefined
+            && daysUntilDelivery <= order.alertDays;
+          return (
+            <View key={order.id} style={[styles.orderCard, index > 0 && styles.rowDivider]}>
+              <View style={styles.orderHeader}>
+                <View style={styles.orderCustomerCopy}>
+                  <Text style={styles.recentSaleName}>{order.customerName}</Text>
+                  <Text style={styles.recentSaleDate}>{order.phone}</Text>
+                </View>
+                <Text style={[styles.orderStatus, order.status === 'delivered' && styles.orderStatusDelivered]}>
+                  {order.status === 'delivered' ? 'Entregue' : 'Pendente'}
+                </Text>
+              </View>
+              <Text style={styles.orderItems}>
+                {order.items.map((item) => `${item.name} × ${item.quantity}`).join(', ')}
+              </Text>
+              <Text style={styles.orderDeliveryDate}>Entrega: {formatLongDate(order.deliveryDate)}</Text>
+              <Text style={[styles.orderCountdown, (shouldAlert || daysUntilDelivery < 0) && styles.stockLabelLow]}>
+                {deliveryCountdown(daysUntilDelivery)}
+              </Text>
+              {order.alertDays !== undefined ? (
+                <Text style={styles.orderAlertSetting}>Alertar {order.alertDays} dia(s) antes</Text>
+              ) : null}
+              {order.status === 'pending' ? (
+                <Pressable
+                  style={styles.orderCompleteButton}
+                  onPress={() => markOrderDelivered(order.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Marcar pedido de ${order.customerName} como entregue`}
+                >
+                  <Text style={styles.orderCompleteText}>Marcar como entregue</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        })}
+        {data.orders.length === 0 ? <Text style={styles.emptyText}>Nenhum pedido cadastrado. Crie um pedido para acompanhar uma entrega.</Text> : null}
       </View>
       <View style={styles.bottomSpacer} />
     </>
@@ -1223,7 +1418,7 @@ export default function App() {
     </>
   );
 
-  const renderField = (label: string, value: string, onChangeText: (text: string) => void, placeholder: string, keyboardType: 'default' | 'decimal-pad' | 'number-pad' = 'default') => (
+  const renderField = (label: string, value: string, onChangeText: (text: string) => void, placeholder: string, keyboardType: 'default' | 'decimal-pad' | 'number-pad' | 'phone-pad' = 'default') => (
     <View style={styles.fieldGroup}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
@@ -1251,8 +1446,8 @@ export default function App() {
   );
 
   const renderForm = () => {
-    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? 'Nova venda' : form === 'expense' ? 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
-    const canSave = form === 'product' || form === 'sale' || form === 'expense' || form === 'supply' || form === 'offer';
+    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
+    const canSave = form === 'product' || form === 'sale' || form === 'order' || form === 'expense' || form === 'supply' || form === 'offer';
     const supplyQuantityNumber = Number.parseInt(supplyQuantity, 10);
     const supplyDailyUseNumber = Number.parseInt(supplyDailyUse, 10);
     const estimatedSupplyDays = supplyDaysRemaining(supplyDailyUseNumber, supplyQuantityNumber);
@@ -1411,6 +1606,57 @@ export default function App() {
                   {activeOffers.length ? <Text style={styles.fieldHint}>Ofertas ativas já aplicadas; descontos manuais são adicionais.</Text> : null}
                 </>
               ) : null}
+              {form === 'order' ? (
+                <>
+                  <Text style={styles.formIntro}>Registre uma encomenda. Os pedidos não alteram o estoque dos produtos.</Text>
+                  {renderField('Nome do cliente', orderCustomerName, setOrderCustomerName, 'Nome completo')}
+                  {renderField('Telefone', orderPhone, setOrderPhone, '(00) 00000-0000', 'phone-pad')}
+                  <View style={styles.formColumns}>
+                    <View style={styles.formColumn}>
+                      {renderField('Data de entrega', orderDeliveryDate, setOrderDeliveryDate, 'DD/MM/AAAA')}
+                    </View>
+                    <View style={styles.formColumn}>
+                      {renderField('Alertar com quantos dias?', orderAlertDays, setOrderAlertDays, 'Opcional', 'number-pad')}
+                    </View>
+                  </View>
+                  <Text style={styles.fieldHint}>Deixe o prazo de alerta vazio se não quiser um aviso antecipado.</Text>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Produtos e quantidades</Text>
+                    {data.products.map((product) => {
+                      const quantity = orderCart[product.id] ?? 0;
+                      return (
+                        <View key={product.id} style={styles.orderProductRow}>
+                          <ProductPicture product={product} />
+                          <View style={styles.cartProductCopy}>
+                            <Text style={styles.cartProductName}>{product.name}</Text>
+                            <Text style={styles.cartProductPrice}>
+                              {product.stock > 0 ? `${product.stock} disponível(is)` : 'Sem estoque · sob encomenda'}
+                            </Text>
+                          </View>
+                          <View style={styles.quantityStepper}>
+                            <Pressable
+                              style={styles.stepButton}
+                              onPress={() => setOrderCart((current) => ({ ...current, [product.id]: Math.max(0, quantity - 1) }))}
+                              accessibilityLabel={`Remover uma unidade de ${product.name} do pedido`}
+                            >
+                              <Text style={styles.stepText}>−</Text>
+                            </Pressable>
+                            <Text style={styles.cartQuantity}>{quantity}</Text>
+                            <Pressable
+                              style={styles.stepButton}
+                              onPress={() => setOrderCart((current) => ({ ...current, [product.id]: quantity + 1 }))}
+                              accessibilityLabel={`Adicionar uma unidade de ${product.name} ao pedido`}
+                            >
+                              <Text style={styles.stepText}>+</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      );
+                    })}
+                    {data.products.length === 0 ? <Text style={styles.emptyText}>Cadastre produtos antes de criar um pedido.</Text> : null}
+                  </View>
+                </>
+              ) : null}
               {form === 'expense' ? (
                 <>
                   <Text style={styles.formIntro}>Registre compras de materiais e despesas do seu negócio.</Text>
@@ -1468,8 +1714,8 @@ export default function App() {
               ) : null}
               {canSave ? (
                 <ActionButton
-                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? 'Confirmar venda' : form === 'expense' ? 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
-                  onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'expense' ? saveExpense : form === 'supply' ? saveSupply : saveOffer}
+                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
+                  onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'order' ? saveOrder : form === 'expense' ? saveExpense : form === 'supply' ? saveSupply : saveOffer}
                 />
               ) : null}
             </ScrollView>
@@ -1506,6 +1752,7 @@ export default function App() {
                 {tab === 'home' ? renderHome() : null}
                 {tab === 'products' ? renderProducts() : null}
                 {tab === 'sales' ? renderSales() : null}
+                {tab === 'orders' ? renderOrders() : null}
                 {tab === 'supplies' ? renderSupplies() : null}
                 {tab === 'management' ? renderManagement() : null}
               </ScrollView>
@@ -1687,6 +1934,18 @@ function createStyles(COLORS: Palette) {
   summarySeparator: { width: 1, height: 34, backgroundColor: COLORS.accentMid, marginHorizontal: 13 },
   saleHistoryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13 },
   savingsText: { color: COLORS.orange, fontSize: 9, marginTop: 4, fontWeight: '600' },
+  orderCard: { paddingVertical: 14, gap: 7 },
+  orderHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  orderCustomerCopy: { flex: 1 },
+  orderStatus: { color: COLORS.secondaryDeep, backgroundColor: COLORS.paleOrange, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, fontSize: 9, fontWeight: '700' },
+  orderStatusDelivered: { color: COLORS.green, backgroundColor: COLORS.paleGreen },
+  orderItems: { color: COLORS.ink, fontSize: 10, lineHeight: 15 },
+  orderDeliveryDate: { color: COLORS.muted, fontSize: 10 },
+  orderCountdown: { color: COLORS.green, fontSize: 12, fontWeight: '700' },
+  orderAlertSetting: { color: COLORS.muted, fontSize: 9 },
+  orderCompleteButton: { alignSelf: 'flex-start', borderRadius: 9, backgroundColor: COLORS.paleGreen, paddingHorizontal: 10, paddingVertical: 8, marginTop: 3 },
+  orderCompleteText: { color: COLORS.green, fontSize: 10, fontWeight: '700' },
+  orderProductRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   financeCard: { backgroundColor: COLORS.white, borderRadius: 18, padding: 17, marginBottom: 13 },
   financeEyebrow: { color: COLORS.muted, fontSize: 9, fontWeight: '700', letterSpacing: 1.1, marginBottom: 14 },
   financeLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 6 },
