@@ -109,5 +109,5 @@ export type Palette = {
   canvasShade: string;
 };
 
-export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'management';
+export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'alerts' | 'management';
 export type FormType = 'product' | 'sale' | 'order' | 'expense' | 'supply' | 'offer' | null;

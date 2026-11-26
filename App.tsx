@@ -52,6 +52,7 @@ import type {
 import ActionButton from './components/ActionButton';
 import ProductPicture from './components/ProductPicture';
 import SectionTitle from './components/SectionTitle';
+import AlertsScreen from './screens/AlertsScreen';
 import ProductsScreen from './screens/ProductsScreen';
 
 export default function App() {
@@ -689,6 +690,7 @@ export default function App() {
     { key: 'sales', icon: '↗', label: 'Vendas' },
     { key: 'orders', icon: '▣', label: 'Pedidos' },
     { key: 'supplies', icon: '▤', label: 'Insumos' },
+    { key: 'alerts', icon: '!', label: 'Alertas' },
     { key: 'management', icon: '☷', label: 'Gestão' },
   ];
 
@@ -842,9 +844,7 @@ export default function App() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${lowStockCount + alertingOrders.length} alertas`}
-        onPress={() => setTab(
-          alertingOrders.length > 0 ? 'orders' : lowStockSupplies.length > 0 ? 'supplies' : 'products',
-        )}
+        onPress={() => setTab('alerts')}
         style={styles.notificationButton}
       >
         <Text style={styles.notificationIcon}>♧</Text>
@@ -1593,6 +1593,15 @@ export default function App() {
                 {tab === 'sales' ? renderSales() : null}
                 {tab === 'orders' ? renderOrders() : null}
                 {tab === 'supplies' ? renderSupplies() : null}
+                {tab === 'alerts' ? (
+                  <AlertsScreen
+                    orders={alertingOrders}
+                    products={lowStockProducts}
+                    supplies={lowStockSupplies}
+                    today={today}
+                    onNavigate={setTab}
+                  />
+                ) : null}
                 {tab === 'management' ? renderManagement() : null}
               </ScrollView>
               <SafeAreaView edges={['bottom']} style={styles.bottomSafeArea}>
