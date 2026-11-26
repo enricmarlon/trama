@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -49,58 +49,9 @@ import type {
   Supply,
   Tab,
 } from './types';
-
-function ActionButton({
-  label,
-  onPress,
-  secondary = false,
-  compact = false,
-}: {
-  label: string;
-  onPress: () => void;
-  secondary?: boolean;
-  compact?: boolean;
-}) {
-  const { styles } = useContext(ThemeContext);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.actionButton, secondary && styles.actionButtonSecondary, compact && styles.actionButtonCompact]}
-    >
-      <Text style={[styles.actionButtonText, secondary && styles.actionButtonTextSecondary, compact && styles.actionButtonTextCompact]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function SectionTitle({ title, action, onPress }: { title: string; action?: string; onPress?: () => void }) {
-  const { styles } = useContext(ThemeContext);
-  return (
-    <View style={styles.sectionTitleRow}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {action && onPress ? (
-        <Pressable onPress={onPress} accessibilityRole="button">
-          <Text style={styles.linkText}>{action}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function ProductPicture({ product, large = false }: { product: Product; large?: boolean }) {
-  const { styles } = useContext(ThemeContext);
-  return (
-    <View style={[styles.productPicture, large && styles.productPictureLarge]}>
-      {product.imageUri ? (
-        <Image source={{ uri: product.imageUri }} style={styles.productImage} />
-      ) : (
-        <Text style={styles.picturePlaceholder}>✿</Text>
-      )}
-    </View>
-  );
-}
+import ActionButton from './components/ActionButton';
+import ProductPicture from './components/ProductPicture';
+import SectionTitle from './components/SectionTitle';
 
 export default function App() {
   const [data, setData] = useState<StoreData>(initialData);
