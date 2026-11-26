@@ -32,6 +32,7 @@ type SaleItem = {
   name: string;
   quantity: number;
   unitPrice: number;
+  lineDiscount?: number;
 };
 
 type Sale = {
@@ -310,6 +311,8 @@ export default function App() {
   const [productPrice, setProductPrice] = useState('');
   const [productStock, setProductStock] = useState('');
   const [lowStockAt, setLowStockAt] = useState('2');
+  const [productDiscountType, setProductDiscountType] = useState<'none' | 'percent' | 'fixed'>('none');
+  const [productDiscountValue, setProductDiscountValue] = useState('');
   const [photoUri, setPhotoUri] = useState<string>();
   const [expenseName, setExpenseName] = useState('');
   const [expenseCategory, setExpenseCategory] = useState('Matéria-prima');
@@ -322,6 +325,7 @@ export default function App() {
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
   const [discountValue, setDiscountValue] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
+  const [cartDiscounts, setCartDiscounts] = useState<Record<string, string>>({});
   const [businessType, setBusinessType] = useState('Ateliê');
   const [customBusinessType, setCustomBusinessType] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -405,10 +409,13 @@ export default function App() {
       setProductPrice('');
       setProductStock('');
       setLowStockAt('2');
+      setProductDiscountType('none');
+      setProductDiscountValue('');
       setPhotoUri(undefined);
     }
     if (next === 'sale') {
       setCart({});
+      setCartDiscounts({});
       setSelectedEmployee('');
     }
     if (next === 'expense') {
@@ -506,8 +513,13 @@ export default function App() {
     const price = parseAmount(productPrice);
     const stock = Number.parseInt(productStock, 10);
     const threshold = Number.parseInt(lowStockAt, 10);
+    const offerValue = parseAmount(productDiscountValue);
     if (!productName.trim() || price <= 0 || !Number.isInteger(stock) || stock < 0 || !Number.isInteger(threshold) || threshold < 0) {
       Alert.alert('Confira os dados', 'Informe o nome, um preço válido e quantidades inteiras iguais ou maiores que zero.');
+      return;
+    }
+    if (productDiscountType !== 'none' && (offerValue <= 0 || (productDiscountType === 'percent' && offerValue > 100))) {
+      Alert.alert('Confira a oferta', 'Informe um desconto maior que zero e, em porcentagem, de no máximo 100%.');
       return;
     }
     const product: Product = {
@@ -519,7 +531,21 @@ export default function App() {
       lowStockAt: threshold,
       imageUri: photoUri,
     };
-    setData((current) => ({ ...current, products: [product, ...current.products] }));
+    const initialOffer: Offer | undefined = productDiscountType === 'none'
+      ? undefined
+      : {
+        id: `o${Date.now()}`,
+        productId: product.id,
+        name: 'Oferta inicial',
+        discountType: productDiscountType,
+        value: offerValue,
+        active: true,
+      };
+    setData((current) => ({
+      ...current,
+      products: [product, ...current.products],
+      offers: initialOffer ? [...current.offers, initialOffer] : current.offers,
+    }));
     closeForm();
   };
 
@@ -530,6 +556,7 @@ export default function App() {
         product,
         quantity: cart[product.id],
         unitPrice: priceFor(product),
+        lineDiscount: parseAmount(cartDiscounts[product.id] ?? ''),
       }));
     if (items.length === 0) {
       Alert.alert('Venda sem produtos', 'Adicione ao menos um produto para registrar a venda.');
@@ -540,16 +567,31 @@ export default function App() {
       Alert.alert('Estoque insuficiente', `Há apenas ${unavailable.product.stock} unidade(s) de ${unavailable.product.name}.`);
       return;
     }
-    const total = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-    const savings = items.reduce((sum, item) => sum + (item.product.price - item.unitPrice) * item.quantity, 0);
+    const invalidDiscount = items.find((item) =>
+      item.lineDiscount < 0 || item.lineDiscount > item.unitPrice * item.quantity,
+    );
+    if (invalidDiscount) {
+      Alert.alert(
+        'Desconto inválido',
+        `O desconto de ${invalidDiscount.product.name} não pode ser maior que o total da linha (${money(invalidDiscount.unitPrice * invalidDiscount.quantity)}).`,
+      );
+      return;
+    }
+    const lineTotal = (item: typeof items[number]) =>
+      Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
+    const total = items.reduce((sum, item) => sum + lineTotal(item), 0);
+    const savings = items.reduce((sum, item) =>
+      sum + item.product.price * item.quantity - lineTotal(item),
+    0);
     const sale: Sale = {
       id: `s${Date.now()}`,
       date: localDateKey(new Date()),
-      items: items.map(({ product, quantity, unitPrice }) => ({
+      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => ({
         productId: product.id,
         name: product.name,
         quantity,
         unitPrice,
+        ...(lineDiscount > 0 ? { lineDiscount } : {}),
       })),
       total,
       savings,
@@ -1214,6 +1256,11 @@ export default function App() {
     const supplyQuantityNumber = Number.parseInt(supplyQuantity, 10);
     const supplyDailyUseNumber = Number.parseInt(supplyDailyUse, 10);
     const estimatedSupplyDays = supplyDaysRemaining(supplyDailyUseNumber, supplyQuantityNumber);
+    const saleTotal = data.products.reduce((sum, product) => {
+      const quantity = cart[product.id] ?? 0;
+      const discount = parseAmount(cartDiscounts[product.id] ?? '');
+      return sum + Math.max(0, priceFor(product) * quantity - discount);
+    }, 0);
     return (
       <Modal visible={form !== null} transparent animationType="slide" onRequestClose={closeForm}>
         <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1254,6 +1301,28 @@ export default function App() {
                   </View>
                   {renderField('Notificar estoque quando chegar a', lowStockAt, setLowStockAt, '2 unidades', 'number-pad')}
                   <Text style={styles.fieldHint}>Você receberá um alerta quando o estoque atingir este limite.</Text>
+                  {renderChoices(
+                    'Oferta no produto',
+                    ['Sem oferta', 'Porcentagem', 'Valor em R$'],
+                    productDiscountType === 'none' ? 'Sem oferta' : productDiscountType === 'percent' ? 'Porcentagem' : 'Valor em R$',
+                    (value) => {
+                      const nextType = value === 'Porcentagem' ? 'percent' : value === 'Valor em R$' ? 'fixed' : 'none';
+                      setProductDiscountType(nextType);
+                      if (nextType === 'none') setProductDiscountValue('');
+                    },
+                  )}
+                  {productDiscountType !== 'none' ? (
+                    <>
+                      {renderField(
+                        productDiscountType === 'percent' ? 'Desconto da oferta (%)' : 'Desconto da oferta (R$)',
+                        productDiscountValue,
+                        setProductDiscountValue,
+                        productDiscountType === 'percent' ? 'Ex.: 15' : 'Ex.: 10,00',
+                        'decimal-pad',
+                      )}
+                      <Text style={styles.fieldHint}>A oferta será aplicada automaticamente nas vendas deste produto.</Text>
+                    </>
+                  ) : null}
                 </>
               ) : null}
               {form === 'sale' ? (
@@ -1286,24 +1355,60 @@ export default function App() {
                     const currentPrice = priceFor(product);
                     return (
                       <View key={product.id} style={styles.cartProduct}>
-                        <ProductPicture product={product} />
-                        <View style={styles.cartProductCopy}>
-                          <Text style={styles.cartProductName}>{product.name}</Text>
-                          <Text style={styles.cartProductPrice}>{money(currentPrice)} · {product.stock} disponíveis</Text>
+                        <View style={styles.cartProductMain}>
+                          <ProductPicture product={product} />
+                          <View style={styles.cartProductCopy}>
+                            <Text style={styles.cartProductName}>{product.name}</Text>
+                            <Text style={styles.cartProductPrice}>
+                              {money(currentPrice)} · {product.stock} disponíveis
+                              {offerFor(product.id) ? ' · oferta' : ''}
+                            </Text>
+                          </View>
+                          <View style={styles.quantityStepper}>
+                            <Pressable
+                              style={styles.stepButton}
+                              onPress={() => {
+                                const nextQuantity = Math.max(0, quantity - 1);
+                                setCart((current) => ({ ...current, [product.id]: nextQuantity }));
+                                if (nextQuantity === 0) setCartDiscounts((current) => ({ ...current, [product.id]: '' }));
+                              }}
+                            >
+                              <Text style={styles.stepText}>−</Text>
+                            </Pressable>
+                            <Text style={styles.cartQuantity}>{quantity}</Text>
+                            <Pressable
+                              style={styles.stepButton}
+                              onPress={() => setCart((current) => ({ ...current, [product.id]: Math.min(product.stock, quantity + 1) }))}
+                            >
+                              <Text style={styles.stepText}>+</Text>
+                            </Pressable>
+                          </View>
                         </View>
-                        <View style={styles.quantityStepper}>
-                          <Pressable style={styles.stepButton} onPress={() => setCart((current) => ({ ...current, [product.id]: Math.max(0, quantity - 1) }))}><Text style={styles.stepText}>−</Text></Pressable>
-                          <Text style={styles.cartQuantity}>{quantity}</Text>
-                          <Pressable style={styles.stepButton} onPress={() => setCart((current) => ({ ...current, [product.id]: Math.min(product.stock, quantity + 1) }))}><Text style={styles.stepText}>+</Text></Pressable>
-                        </View>
+                        {quantity > 0 ? (
+                          <View style={styles.cartDiscountRow}>
+                            <View style={styles.cartDiscountCopy}>
+                              <Text style={styles.cartDiscountLabel}>Desconto adicional (R$)</Text>
+                              <Text style={styles.cartDiscountHint}>Valor total desta linha; soma à oferta.</Text>
+                            </View>
+                            <TextInput
+                              value={cartDiscounts[product.id] ?? ''}
+                              onChangeText={(value) => setCartDiscounts((current) => ({ ...current, [product.id]: value }))}
+                              placeholder="0,00"
+                              placeholderTextColor={palette.muted}
+                              keyboardType="decimal-pad"
+                              style={styles.cartDiscountInput}
+                              accessibilityLabel={`Desconto total em reais para ${product.name}`}
+                            />
+                          </View>
+                        ) : null}
                       </View>
                     );
                   })}
                   <View style={styles.cartTotal}>
                     <Text style={styles.cartTotalLabel}>Total da venda</Text>
-                    <Text style={styles.cartTotalValue}>{money(data.products.reduce((sum, product) => sum + (cart[product.id] ?? 0) * priceFor(product), 0))}</Text>
+                    <Text style={styles.cartTotalValue}>{money(saleTotal)}</Text>
                   </View>
-                  {activeOffers.length ? <Text style={styles.fieldHint}>Ofertas ativas já aplicadas ao total.</Text> : null}
+                  {activeOffers.length ? <Text style={styles.fieldHint}>Ofertas ativas já aplicadas; descontos manuais são adicionais.</Text> : null}
                 </>
               ) : null}
               {form === 'expense' ? (
@@ -1633,10 +1738,16 @@ function createStyles(COLORS: Palette) {
   formColumns: { flexDirection: 'row', gap: 10 },
   formColumn: { flex: 1 },
   formIntro: { color: COLORS.muted, fontSize: 12, marginBottom: 7, lineHeight: 18 },
-  cartProduct: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 10 },
+  cartProduct: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  cartProductMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   cartProductCopy: { flex: 1 },
   cartProductName: { color: COLORS.ink, fontSize: 11, fontWeight: '600' },
   cartProductPrice: { color: COLORS.muted, fontSize: 9, marginTop: 4 },
+  cartDiscountRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 9, paddingLeft: 50 },
+  cartDiscountCopy: { flex: 1 },
+  cartDiscountLabel: { color: COLORS.ink, fontSize: 10, fontWeight: '600' },
+  cartDiscountHint: { color: COLORS.muted, fontSize: 9, marginTop: 3 },
+  cartDiscountInput: { width: 82, minHeight: 38, borderRadius: 10, backgroundColor: COLORS.white, paddingHorizontal: 9, color: COLORS.ink, fontSize: 12, textAlign: 'right' },
   cartQuantity: { color: COLORS.ink, fontSize: 12, fontWeight: '700', minWidth: 11, textAlign: 'center' },
   cartTotal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 15 },
   cartTotalLabel: { color: COLORS.ink, fontSize: 13, fontWeight: '600' },
