@@ -70,6 +70,7 @@ export default function App() {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [month, setMonth] = useState(new Date());
+  const [salesEmployeeFilter, setSalesEmployeeFilter] = useState<string[] | null>(null);
   const [query, setQuery] = useState('');
   const [productName, setProductName] = useState('');
   const [productCategory, setProductCategory] = useState('Casa');
@@ -186,7 +187,20 @@ export default function App() {
     : undefined;
   const saleUnitPrice = (product: Product) =>
     editingSale?.items.find((item) => item.productId === product.id)?.unitPrice ?? priceFor(product);
+  const salesEmployeeOptions = [...new Set(data.company?.employees ?? [])];
+  const validSalesEmployeeFilter = salesEmployeeFilter?.filter((employee) =>
+    salesEmployeeOptions.includes(employee),
+  ) ?? null;
+  const activeSalesEmployeeFilter = salesEmployeeFilter
+    && salesEmployeeFilter.length > 0
+    && validSalesEmployeeFilter?.length === 0
+    ? null
+    : validSalesEmployeeFilter;
   const monthSales = data.sales.filter((sale) => sameMonth(sale.date, month));
+  const reportSales = salesEmployeeOptions.length === 0 || activeSalesEmployeeFilter === null
+    ? monthSales
+    : monthSales.filter((sale) => sale.employeeName && activeSalesEmployeeFilter.includes(sale.employeeName));
+  const reportRevenue = reportSales.reduce((sum, sale) => sum + sale.total, 0);
   const monthExpenses = data.expenses.filter((expense) => sameMonth(expense.date, month));
   const monthRevenue = monthSales.reduce((sum, sale) => sum + sale.total, 0);
   const monthSpent = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
@@ -1404,14 +1418,59 @@ export default function App() {
         <Text style={styles.monthSelectorLabel}>{monthLabel}</Text>
         <Pressable onPress={() => changeMonth(1)} style={styles.monthArrow}><Text style={styles.monthArrowText}>›</Text></Pressable>
       </View>
+      {salesEmployeeOptions.length > 0 ? (
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Filtrar por vendedor</Text>
+          <View style={styles.choiceRow}>
+            <Pressable
+              onPress={() => setSalesEmployeeFilter(null)}
+              style={[styles.choiceChip, activeSalesEmployeeFilter === null && styles.choiceChipSelected]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: activeSalesEmployeeFilter === null }}
+            >
+              <Text style={[styles.choiceText, activeSalesEmployeeFilter === null && styles.choiceTextSelected]}>Todos</Text>
+            </Pressable>
+            {salesEmployeeOptions.map((employee) => {
+              const selected = activeSalesEmployeeFilter?.includes(employee) ?? false;
+              return (
+                <Pressable
+                  key={employee}
+                  onPress={() => setSalesEmployeeFilter((current) => {
+                    const availableSelection = current?.filter((name) =>
+                      salesEmployeeOptions.includes(name),
+                    ) ?? null;
+                    const normalizedSelection = current
+                      && current.length > 0
+                      && availableSelection?.length === 0
+                      ? null
+                      : availableSelection;
+                    if (normalizedSelection === null) return [employee];
+                    const next = normalizedSelection.includes(employee)
+                      ? normalizedSelection.filter((name) => name !== employee)
+                      : [...normalizedSelection, employee];
+                    return next.length === salesEmployeeOptions.length ? null : next;
+                  })}
+                  style={[styles.choiceChip, selected && styles.choiceChipSelected]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                >
+                  <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{employee}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : (
+        <Text style={styles.fieldHint}>Nenhum funcionário cadastrado; exibindo todas as vendas.</Text>
+      )}
       <View style={styles.salesSummary}>
-        <View style={styles.salesSummaryCell}><Text style={styles.summaryLabel}>FATURAMENTO</Text><Text style={styles.summaryValue}>{money(monthRevenue)}</Text></View>
+        <View style={styles.salesSummaryCell}><Text style={styles.summaryLabel}>FATURAMENTO</Text><Text style={styles.summaryValue}>{money(reportRevenue)}</Text></View>
         <View style={styles.summarySeparator} />
-        <View style={styles.salesSummaryCell}><Text style={styles.summaryLabel}>VENDAS</Text><Text style={styles.summaryValue}>{monthSales.length}</Text></View>
+        <View style={styles.salesSummaryCell}><Text style={styles.summaryLabel}>VENDAS</Text><Text style={styles.summaryValue}>{reportSales.length}</Text></View>
       </View>
       <SectionTitle title="Histórico" />
       <View style={styles.listCard}>
-        {monthSales.map((sale, index) => (
+        {reportSales.map((sale, index) => (
           <View key={sale.id} style={[styles.saleHistoryEntry, index > 0 && styles.rowDivider]}>
             <View style={styles.saleHistoryRow}>
               <View style={styles.saleIcon}><Text style={styles.saleIconText}>↗</Text></View>
@@ -1445,7 +1504,7 @@ export default function App() {
             </View>
           </View>
         ))}
-        {monthSales.length === 0 ? <Text style={styles.emptyText}>Nenhuma venda neste mês.</Text> : null}
+        {reportSales.length === 0 ? <Text style={styles.emptyText}>Nenhuma venda para os vendedores selecionados neste mês.</Text> : null}
       </View>
       <View style={styles.bottomSpacer} />
     </>
