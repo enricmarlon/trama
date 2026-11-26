@@ -67,6 +67,7 @@ export default function App() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [form, setForm] = useState<FormType>(null);
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [month, setMonth] = useState(new Date());
   const [query, setQuery] = useState('');
   const [productName, setProductName] = useState('');
@@ -179,6 +180,11 @@ export default function App() {
     const discount = offer.discountType === 'percent' ? (product.price * offer.value) / 100 : offer.value;
     return Math.max(0, product.price - discount);
   };
+  const editingSale = editingSaleId
+    ? data.sales.find((sale) => sale.id === editingSaleId)
+    : undefined;
+  const saleUnitPrice = (product: Product) =>
+    editingSale?.items.find((item) => item.productId === product.id)?.unitPrice ?? priceFor(product);
   const monthSales = data.sales.filter((sale) => sameMonth(sale.date, month));
   const monthExpenses = data.expenses.filter((expense) => sameMonth(expense.date, month));
   const monthRevenue = monthSales.reduce((sum, sale) => sum + sale.total, 0);
@@ -224,6 +230,7 @@ export default function App() {
       setPhotoUri(undefined);
     }
     if (next === 'sale') {
+      setEditingSaleId(null);
       setCart({});
       setCartDiscounts({});
       setSelectedEmployee('');
@@ -254,7 +261,41 @@ export default function App() {
     }
   };
 
-  const closeForm = () => setForm(null);
+  const closeForm = () => {
+    setForm(null);
+    setEditingSaleId(null);
+  };
+
+  const openSaleForEditing = (sale: Sale) => {
+    if (sale.items.some((item) => item.commissionPaidDate)) {
+      Alert.alert(
+        'Venda protegida',
+        'Esta venda tem uma comissão marcada como paga e não pode ser alterada.',
+      );
+      return;
+    }
+    const missingProduct = sale.items.find((item) =>
+      !data.products.some((product) => product.id === item.productId),
+    );
+    if (missingProduct) {
+      Alert.alert(
+        'Não é possível editar esta venda',
+        `O produto "${missingProduct.name}" não está mais cadastrado. Reative ou cadastre o produto antes de editar a venda.`,
+      );
+      return;
+    }
+    setEditingSaleId(sale.id);
+    setCart(sale.items.reduce<Record<string, number>>((items, item) => {
+      items[item.productId] = (items[item.productId] ?? 0) + item.quantity;
+      return items;
+    }, {}));
+    setCartDiscounts(sale.items.reduce<Record<string, string>>((discounts, item) => {
+      discounts[item.productId] = item.lineDiscount ? String(item.lineDiscount) : '';
+      return discounts;
+    }, {}));
+    setSelectedEmployee(sale.employeeName ?? '');
+    setForm('sale');
+  };
 
   const addEmployee = () => {
     const name = employeeDraft.trim();
@@ -479,23 +520,46 @@ export default function App() {
   };
 
   const saveSale = () => {
+    const previousSale = editingSaleId
+      ? data.sales.find((sale) => sale.id === editingSaleId)
+      : undefined;
+    if (editingSaleId && !previousSale) {
+      Alert.alert('Venda não encontrada', 'Atualize o histórico e tente novamente.');
+      return;
+    }
+    if (previousSale?.items.some((item) => item.commissionPaidDate)) {
+      Alert.alert('Venda protegida', 'Esta venda tem uma comissão marcada como paga e não pode ser alterada.');
+      return;
+    }
     const items = data.products
       .filter((product) => (cart[product.id] ?? 0) > 0)
-      .map((product) => ({
-        product,
-        quantity: cart[product.id],
-        unitPrice: priceFor(product),
-        lineDiscount: parseAmount(cartDiscounts[product.id] ?? ''),
-        commissionEmployee: product.makerEmployee,
-        commissionPercent: product.commissionPercent ?? 0,
-      }));
+      .map((product) => {
+        const previousItem = previousSale?.items.find((item) => item.productId === product.id);
+        return {
+          product,
+          quantity: cart[product.id],
+          unitPrice: previousItem?.unitPrice ?? priceFor(product),
+          lineDiscount: parseAmount(cartDiscounts[product.id] ?? ''),
+          previousItem,
+        };
+      });
     if (items.length === 0) {
       Alert.alert('Venda sem produtos', 'Adicione ao menos um produto para registrar a venda.');
       return;
     }
-    const unavailable = items.find(({ product, quantity }) => quantity > product.stock);
+    const previousQuantities = new Map<string, number>();
+    previousSale?.items.forEach((item) => {
+      previousQuantities.set(
+        item.productId,
+        (previousQuantities.get(item.productId) ?? 0) + item.quantity,
+      );
+    });
+    const unavailable = items.find(({ product, quantity }) =>
+      quantity > product.stock + (previousQuantities.get(product.id) ?? 0),
+    );
     if (unavailable) {
-      Alert.alert('Estoque insuficiente', `Há apenas ${unavailable.product.stock} unidade(s) de ${unavailable.product.name}.`);
+      const available = unavailable.product.stock + (previousQuantities.get(unavailable.product.id) ?? 0);
+      Alert.alert('Estoque insuficiente', `Há apenas ${available} unidade(s) disponíveis de ${unavailable.product.name}.`);
       return;
     }
     const invalidDiscount = items.find((item) =>
@@ -512,13 +576,15 @@ export default function App() {
       Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
     const total = items.reduce((sum, item) => sum + lineTotal(item), 0);
     const savings = items.reduce((sum, item) =>
-      sum + item.product.price * item.quantity - lineTotal(item),
+      sum + Math.max(0, item.product.price * item.quantity - lineTotal(item)),
     0);
-    const sale: Sale = {
-      id: `s${Date.now()}`,
-      date: localDateKey(new Date()),
-      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => {
-        const commissionPercent = product.commissionPercent ?? 0;
+    const saleItems: Sale['items'] = items.map(({ product, quantity, unitPrice, lineDiscount, previousItem }) => {
+        const commissionPercent = previousItem
+          ? previousItem.commissionPercent ?? 0
+          : product.commissionPercent ?? 0;
+        const commissionEmployee = previousItem
+          ? previousItem.commissionEmployee
+          : product.makerEmployee;
         const commissionAmount = calculateCommissionAmount(
           Math.max(0, unitPrice * quantity - lineDiscount),
           commissionPercent,
@@ -529,29 +595,122 @@ export default function App() {
           quantity,
           unitPrice,
           ...(lineDiscount > 0 ? { lineDiscount } : {}),
-          ...(product.makerEmployee && commissionPercent > 0
+          ...(commissionEmployee && commissionPercent > 0
             ? {
-              commissionEmployee: product.makerEmployee,
+              commissionEmployee,
               commissionPercent,
               commissionAmount,
             }
             : {}),
         };
-      }),
+      });
+    const sale: Sale = {
+      id: previousSale?.id ?? `s${Date.now()}`,
+      date: previousSale?.date ?? localDateKey(new Date()),
+      items: saleItems,
       total,
       savings,
       ...(selectedEmployee ? { employeeName: selectedEmployee } : {}),
     };
-    setData((current) => ({
-      ...current,
-      sales: [sale, ...current.sales],
-      products: current.products.map((product) => {
-        const sold = cart[product.id] ?? 0;
-        return sold ? { ...product, stock: product.stock - sold } : product;
-      }),
-    }));
-    setMonth(new Date());
+    setData((current) => {
+      const currentSale = previousSale
+        ? current.sales.find((item) => item.id === previousSale.id)
+        : undefined;
+      if (previousSale && (!currentSale || currentSale.items.some((item) => item.commissionPaidDate))) {
+        return current;
+      }
+      const oldQuantities = new Map<string, number>();
+      currentSale?.items.forEach((item) => {
+        oldQuantities.set(item.productId, (oldQuantities.get(item.productId) ?? 0) + item.quantity);
+      });
+      const newQuantities = new Map<string, number>();
+      saleItems.forEach((item) => {
+        newQuantities.set(item.productId, (newQuantities.get(item.productId) ?? 0) + item.quantity);
+      });
+      const orderItems = saleItems.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        ...(item.lineDiscount ? { lineDiscount: item.lineDiscount } : {}),
+        ...(item.commissionEmployee ? { commissionEmployee: item.commissionEmployee } : {}),
+        ...(item.commissionPercent !== undefined ? { commissionPercent: item.commissionPercent } : {}),
+        ...(item.commissionAmount !== undefined ? { commissionAmount: item.commissionAmount } : {}),
+      }));
+      return {
+        ...current,
+        sales: currentSale
+          ? current.sales.map((item) => item.id === sale.id ? sale : item)
+          : [sale, ...current.sales],
+        orders: currentSale
+          ? current.orders.map((order) => order.saleId === sale.id
+            ? { ...order, items: orderItems, total, savings }
+            : order)
+          : current.orders,
+        products: current.products.map((product) => {
+          const stockChange = (oldQuantities.get(product.id) ?? 0) - (newQuantities.get(product.id) ?? 0);
+          return stockChange ? { ...product, stock: product.stock + stockChange } : product;
+        }),
+      };
+    });
+    if (!previousSale) setMonth(new Date());
     closeForm();
+  };
+
+  const deleteSale = (saleId: string) => {
+    const sale = data.sales.find((item) => item.id === saleId);
+    if (!sale) return;
+    if (sale.items.some((item) => item.commissionPaidDate)) {
+      Alert.alert(
+        'Venda protegida',
+        'Esta venda tem uma comissão marcada como paga e não pode ser excluída.',
+      );
+      return;
+    }
+    const linkedOrder = data.orders.find((order) => order.saleId === sale.id);
+    const hasMissingProduct = sale.items.some((item) =>
+      !data.products.some((product) => product.id === item.productId),
+    );
+    const message = linkedOrder
+      ? 'Os itens voltarão ao estoque e o pedido será reaberto como pendente.'
+      : 'Os itens desta venda voltarão ao estoque.';
+    Alert.alert(
+      'Excluir venda?',
+      hasMissingProduct
+        ? `${message} Produtos removidos do catálogo não podem ter o estoque restaurado.`
+        : message,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => setData((current) => {
+            const currentSale = current.sales.find((item) => item.id === saleId);
+            if (!currentSale || currentSale.items.some((item) => item.commissionPaidDate)) {
+              return current;
+            }
+            const restoredQuantities = new Map<string, number>();
+            currentSale.items.forEach((item) => {
+              restoredQuantities.set(
+                item.productId,
+                (restoredQuantities.get(item.productId) ?? 0) + item.quantity,
+              );
+            });
+            return {
+              ...current,
+              sales: current.sales.filter((item) => item.id !== saleId),
+              orders: current.orders.map((order) => order.saleId === saleId
+                ? { ...order, status: 'pending', saleId: undefined }
+                : order),
+              products: current.products.map((product) => ({
+                ...product,
+                stock: product.stock + (restoredQuantities.get(product.id) ?? 0),
+              })),
+            };
+          }),
+        },
+      ],
+    );
   };
 
   const saveOrder = () => {
@@ -1183,17 +1342,37 @@ export default function App() {
       <SectionTitle title="Histórico" />
       <View style={styles.listCard}>
         {monthSales.map((sale, index) => (
-          <View key={sale.id} style={[styles.saleHistoryRow, index > 0 && styles.rowDivider]}>
-            <View style={styles.saleIcon}><Text style={styles.saleIconText}>↗</Text></View>
-            <View style={styles.recentSaleCopy}>
-              <Text style={styles.recentSaleName}>{sale.items.map((item) => item.name).join(', ')}</Text>
-              <Text style={styles.recentSaleDate}>
-                {formatDate(sale.date)} · {sale.items.reduce((sum, item) => sum + item.quantity, 0)} item(ns)
-                {sale.employeeName ? ` · ${sale.employeeName}` : ''}
-              </Text>
-              {sale.savings > 0 ? <Text style={styles.savingsText}>Desconto de {money(sale.savings)}</Text> : null}
+          <View key={sale.id} style={[styles.saleHistoryEntry, index > 0 && styles.rowDivider]}>
+            <View style={styles.saleHistoryRow}>
+              <View style={styles.saleIcon}><Text style={styles.saleIconText}>↗</Text></View>
+              <View style={styles.recentSaleCopy}>
+                <Text style={styles.recentSaleName}>{sale.items.map((item) => item.name).join(', ')}</Text>
+                <Text style={styles.recentSaleDate}>
+                  {formatDate(sale.date)} · {sale.items.reduce((sum, item) => sum + item.quantity, 0)} item(ns)
+                  {sale.employeeName ? ` · ${sale.employeeName}` : ''}
+                </Text>
+                {sale.savings > 0 ? <Text style={styles.savingsText}>Desconto de {money(sale.savings)}</Text> : null}
+              </View>
+              <Text style={styles.recentSaleAmount}>{money(sale.total)}</Text>
             </View>
-            <Text style={styles.recentSaleAmount}>{money(sale.total)}</Text>
+            <View style={styles.saleActionsRow}>
+              <Pressable
+                onPress={() => openSaleForEditing(sale)}
+                style={styles.saleActionButton}
+                accessibilityRole="button"
+                accessibilityLabel="Editar venda"
+              >
+                <Text style={styles.saleActionText}>Editar</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => deleteSale(sale.id)}
+                style={[styles.saleActionButton, styles.saleActionDanger]}
+                accessibilityRole="button"
+                accessibilityLabel="Excluir venda e devolver itens ao estoque"
+              >
+                <Text style={[styles.saleActionText, styles.saleActionDangerText]}>Excluir</Text>
+              </Pressable>
+            </View>
           </View>
         ))}
         {monthSales.length === 0 ? <Text style={styles.emptyText}>Nenhuma venda neste mês.</Text> : null}
@@ -1446,7 +1625,7 @@ export default function App() {
   );
 
   const renderForm = () => {
-    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
+    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? editingSale ? 'Editar venda' : 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
     const canSave = form === 'product' || form === 'sale' || form === 'order' || form === 'expense' || form === 'supply' || form === 'offer';
     const supplyQuantityNumber = Number.parseInt(supplyQuantity, 10);
     const supplyDailyUseNumber = Number.parseInt(supplyDailyUse, 10);
@@ -1454,7 +1633,7 @@ export default function App() {
     const saleTotal = data.products.reduce((sum, product) => {
       const quantity = cart[product.id] ?? 0;
       const discount = parseAmount(cartDiscounts[product.id] ?? '');
-      return sum + Math.max(0, priceFor(product) * quantity - discount);
+      return sum + Math.max(0, saleUnitPrice(product) * quantity - discount);
     }, 0);
     const orderTotal = data.products.reduce((sum, product) => {
       const quantity = orderCart[product.id] ?? 0;
@@ -1553,8 +1732,12 @@ export default function App() {
               ) : null}
               {form === 'sale' ? (
                 <>
-                  <Text style={styles.formIntro}>Escolha os produtos e as quantidades desta venda.</Text>
-                  {(data.company?.employees ?? []).length > 0 ? (
+                  <Text style={styles.formIntro}>
+                    {editingSale
+                      ? 'Ajuste os itens desta venda. O estoque será atualizado pela diferença das quantidades.'
+                      : 'Escolha os produtos e as quantidades desta venda.'}
+                  </Text>
+                  {!editingSale && (data.company?.employees ?? []).length > 0 ? (
                     <View style={styles.fieldGroup}>
                       <Text style={styles.fieldLabel}>Funcionário responsável <Text style={styles.optionalLabel}>(opcional)</Text></Text>
                       <View style={styles.choiceRow}>
@@ -1578,7 +1761,11 @@ export default function App() {
                   ) : null}
                   {data.products.map((product) => {
                     const quantity = cart[product.id] ?? 0;
-                    const currentPrice = priceFor(product);
+                    const originalQuantity = editingSale?.items
+                      .filter((item) => item.productId === product.id)
+                      .reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+                    const availableQuantity = product.stock + originalQuantity;
+                    const currentPrice = saleUnitPrice(product);
                     return (
                       <View key={product.id} style={styles.cartProduct}>
                         <View style={styles.cartProductMain}>
@@ -1586,8 +1773,8 @@ export default function App() {
                           <View style={styles.cartProductCopy}>
                             <Text style={styles.cartProductName}>{product.name}</Text>
                             <Text style={styles.cartProductPrice}>
-                              {money(currentPrice)} · {product.stock} disponíveis
-                              {offerFor(product.id) ? ' · oferta' : ''}
+                              {money(currentPrice)} · {availableQuantity} disponíveis
+                              {!editingSale && offerFor(product.id) ? ' · oferta' : ''}
                             </Text>
                           </View>
                           <View style={styles.quantityStepper}>
@@ -1603,8 +1790,9 @@ export default function App() {
                             </Pressable>
                             <Text style={styles.cartQuantity}>{quantity}</Text>
                             <Pressable
-                              style={styles.stepButton}
-                              onPress={() => setCart((current) => ({ ...current, [product.id]: Math.min(product.stock, quantity + 1) }))}
+                              style={[styles.stepButton, quantity >= availableQuantity && styles.stepButtonDisabled]}
+                              disabled={quantity >= availableQuantity}
+                              onPress={() => setCart((current) => ({ ...current, [product.id]: Math.min(availableQuantity, quantity + 1) }))}
                             >
                               <Text style={styles.stepText}>+</Text>
                             </Pressable>
@@ -1634,7 +1822,7 @@ export default function App() {
                     <Text style={styles.cartTotalLabel}>Total da venda</Text>
                     <Text style={styles.cartTotalValue}>{money(saleTotal)}</Text>
                   </View>
-                  {activeOffers.length ? <Text style={styles.fieldHint}>Ofertas ativas já aplicadas; descontos manuais são adicionais.</Text> : null}
+                  {!editingSale && activeOffers.length ? <Text style={styles.fieldHint}>Ofertas ativas já aplicadas; descontos manuais são adicionais.</Text> : null}
                 </>
               ) : null}
               {form === 'order' ? (
@@ -1774,7 +1962,7 @@ export default function App() {
               ) : null}
               {canSave ? (
                 <ActionButton
-                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
+                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? editingSale ? 'Salvar alterações' : 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
                   onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'order' ? saveOrder : form === 'expense' ? saveExpense : form === 'supply' ? saveSupply : saveOffer}
                 />
               ) : null}
