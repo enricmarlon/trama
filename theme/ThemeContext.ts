@@ -101,6 +101,7 @@ export function createStyles(COLORS: Palette) {
   navIconSelected: { color: COLORS.green, fontWeight: '700' },
   navLabel: { color: COLORS.muted, fontSize: 9, fontWeight: '500' },
   navLabelSelected: { color: COLORS.green, fontWeight: '700' },
+  navLabelCompact: { fontSize: 8 },
   navIndicator: { position: 'absolute', bottom: -7, width: 17, height: 2, borderRadius: 2, backgroundColor: COLORS.green },
   pageEyebrow: { color: COLORS.muted, fontSize: 10, fontWeight: '700', letterSpacing: 1.2, marginTop: 4 },
   pageHeadingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 7, marginBottom: 18 },

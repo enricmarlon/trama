@@ -134,6 +134,13 @@ export const formatLongDate = (value: string) =>
     year: 'numeric',
   });
 
+export const formatNumericDate = (value: string) =>
+  new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR');
+
+export function calculateCommissionAmount(lineTotal: number, percent: number) {
+  return Math.round(lineTotal * percent) / 100;
+}
+
 export const sameMonth = (date: string, month: Date) => {
   const [year, monthNumber] = date.slice(0, 10).split('-').map(Number);
   return year === month.getFullYear() && monthNumber === month.getMonth() + 1;

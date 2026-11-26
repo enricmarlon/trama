@@ -58,7 +58,9 @@ function isProduct(value: unknown): value is Product {
     && isFiniteNumber(value.price)
     && isFiniteNumber(value.stock)
     && isFiniteNumber(value.lowStockAt)
-    && isOptionalString(value.imageUri);
+    && isOptionalString(value.imageUri)
+    && isOptionalString(value.makerEmployee)
+    && (value.commissionPercent === undefined || isFiniteNumber(value.commissionPercent));
 }
 
 function isSaleItem(value: unknown): value is SaleItem {
@@ -67,7 +69,11 @@ function isSaleItem(value: unknown): value is SaleItem {
     && isString(value.name)
     && isFiniteNumber(value.quantity)
     && isFiniteNumber(value.unitPrice)
-    && (value.lineDiscount === undefined || isFiniteNumber(value.lineDiscount));
+    && (value.lineDiscount === undefined || isFiniteNumber(value.lineDiscount))
+    && isOptionalString(value.commissionEmployee)
+    && (value.commissionPercent === undefined || isFiniteNumber(value.commissionPercent))
+    && (value.commissionAmount === undefined || isFiniteNumber(value.commissionAmount))
+    && isOptionalString(value.commissionPaidDate);
 }
 
 function isCustomerOrderItem(value: unknown): value is CustomerOrderItem {

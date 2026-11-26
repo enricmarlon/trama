@@ -6,6 +6,8 @@ export type Product = {
   stock: number;
   lowStockAt: number;
   imageUri?: string;
+  makerEmployee?: string;
+  commissionPercent?: number;
 };
 
 export type SaleItem = {
@@ -14,6 +16,10 @@ export type SaleItem = {
   quantity: number;
   unitPrice: number;
   lineDiscount?: number;
+  commissionEmployee?: string;
+  commissionPercent?: number;
+  commissionAmount?: number;
+  commissionPaidDate?: string;
 };
 
 export type Sale = {
@@ -31,6 +37,10 @@ export type CustomerOrderItem = {
   quantity: number;
   unitPrice: number;
   lineDiscount?: number;
+  commissionEmployee?: string;
+  commissionPercent?: number;
+  commissionAmount?: number;
+  commissionPaidDate?: string;
 };
 
 export type CustomerOrder = {
@@ -109,5 +119,5 @@ export type Palette = {
   canvasShade: string;
 };
 
-export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'alerts' | 'management';
+export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'alerts' | 'commissions' | 'management';
 export type FormType = 'product' | 'sale' | 'order' | 'expense' | 'supply' | 'offer' | null;

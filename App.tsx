@@ -32,6 +32,7 @@ import {
   deliveryCountdown,
   formatDate,
   formatLongDate,
+  calculateCommissionAmount,
   localDateKey,
   money,
   parseAmount,
@@ -56,6 +57,7 @@ import ActionButton from './components/ActionButton';
 import ProductPicture from './components/ProductPicture';
 import SectionTitle from './components/SectionTitle';
 import AlertsScreen from './screens/AlertsScreen';
+import CommissionsScreen from './screens/CommissionsScreen';
 import ProductsScreen from './screens/ProductsScreen';
 import { createBackupFile, persistProductImage, readBackupFile } from './backup';
 
@@ -72,6 +74,8 @@ export default function App() {
   const [productPrice, setProductPrice] = useState('');
   const [productStock, setProductStock] = useState('');
   const [lowStockAt, setLowStockAt] = useState('2');
+  const [productMakerEmployee, setProductMakerEmployee] = useState('');
+  const [productCommissionPercent, setProductCommissionPercent] = useState('0');
   const [productDiscountType, setProductDiscountType] = useState<'none' | 'percent' | 'fixed'>('none');
   const [productDiscountValue, setProductDiscountValue] = useState('');
   const [photoUri, setPhotoUri] = useState<string>();
@@ -213,6 +217,8 @@ export default function App() {
       setProductPrice('');
       setProductStock('');
       setLowStockAt('2');
+      setProductMakerEmployee('');
+      setProductCommissionPercent('0');
       setProductDiscountType('none');
       setProductDiscountValue('');
       setPhotoUri(undefined);
@@ -413,12 +419,21 @@ export default function App() {
     const stock = Number.parseInt(productStock, 10);
     const threshold = Number.parseInt(lowStockAt, 10);
     const offerValue = parseAmount(productDiscountValue);
+    const commissionPercent = parseAmount(productCommissionPercent);
     if (!productName.trim() || price <= 0 || !Number.isInteger(stock) || stock < 0 || !Number.isInteger(threshold) || threshold < 0) {
       Alert.alert('Confira os dados', 'Informe o nome, um preço válido e quantidades inteiras iguais ou maiores que zero.');
       return;
     }
     if (productDiscountType !== 'none' && (offerValue <= 0 || (productDiscountType === 'percent' && offerValue > 100))) {
       Alert.alert('Confira a oferta', 'Informe um desconto maior que zero e, em porcentagem, de no máximo 100%.');
+      return;
+    }
+    if (commissionPercent < 0 || commissionPercent > 100) {
+      Alert.alert('Confira a comissão', 'Informe uma porcentagem de comissão entre 0% e 100%.');
+      return;
+    }
+    if (commissionPercent > 0 && !productMakerEmployee) {
+      Alert.alert('Selecione quem fabricou', 'Escolha o funcionário responsável pela fabricação para cadastrar a comissão.');
       return;
     }
     const id = `p${Date.now()}`;
@@ -442,6 +457,8 @@ export default function App() {
       stock,
       lowStockAt: threshold,
       imageUri,
+      ...(productMakerEmployee ? { makerEmployee: productMakerEmployee } : {}),
+      commissionPercent,
     };
     const initialOffer: Offer | undefined = productDiscountType === 'none'
       ? undefined
@@ -469,6 +486,8 @@ export default function App() {
         quantity: cart[product.id],
         unitPrice: priceFor(product),
         lineDiscount: parseAmount(cartDiscounts[product.id] ?? ''),
+        commissionEmployee: product.makerEmployee,
+        commissionPercent: product.commissionPercent ?? 0,
       }));
     if (items.length === 0) {
       Alert.alert('Venda sem produtos', 'Adicione ao menos um produto para registrar a venda.');
@@ -498,13 +517,27 @@ export default function App() {
     const sale: Sale = {
       id: `s${Date.now()}`,
       date: localDateKey(new Date()),
-      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => ({
-        productId: product.id,
-        name: product.name,
-        quantity,
-        unitPrice,
-        ...(lineDiscount > 0 ? { lineDiscount } : {}),
-      })),
+      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => {
+        const commissionPercent = product.commissionPercent ?? 0;
+        const commissionAmount = calculateCommissionAmount(
+          Math.max(0, unitPrice * quantity - lineDiscount),
+          commissionPercent,
+        );
+        return {
+          productId: product.id,
+          name: product.name,
+          quantity,
+          unitPrice,
+          ...(lineDiscount > 0 ? { lineDiscount } : {}),
+          ...(product.makerEmployee && commissionPercent > 0
+            ? {
+              commissionEmployee: product.makerEmployee,
+              commissionPercent,
+              commissionAmount,
+            }
+            : {}),
+        };
+      }),
       total,
       savings,
       ...(selectedEmployee ? { employeeName: selectedEmployee } : {}),
@@ -536,6 +569,8 @@ export default function App() {
           quantity,
           unitPrice: priceFor(product),
           lineDiscount: parseAmount(orderCartDiscounts[product.id] ?? ''),
+          commissionEmployee: product.makerEmployee,
+          commissionPercent: product.commissionPercent ?? 0,
         };
       });
 
@@ -580,13 +615,27 @@ export default function App() {
       createdDate: today,
       deliveryDate,
       ...(alertDays !== undefined ? { alertDays } : {}),
-      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => ({
-        productId: product.id,
-        name: product.name,
-        quantity,
-        unitPrice,
-        ...(lineDiscount > 0 ? { lineDiscount } : {}),
-      })),
+      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => {
+        const commissionPercent = product.commissionPercent ?? 0;
+        const commissionAmount = calculateCommissionAmount(
+          Math.max(0, unitPrice * quantity - lineDiscount),
+          commissionPercent,
+        );
+        return {
+          productId: product.id,
+          name: product.name,
+          quantity,
+          unitPrice,
+          ...(lineDiscount > 0 ? { lineDiscount } : {}),
+          ...(product.makerEmployee && commissionPercent > 0
+            ? {
+              commissionEmployee: product.makerEmployee,
+              commissionPercent,
+              commissionAmount,
+            }
+            : {}),
+        };
+      }),
       total,
       savings,
       status: 'pending',
@@ -620,6 +669,9 @@ export default function App() {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         ...(item.lineDiscount ? { lineDiscount: item.lineDiscount } : {}),
+        ...(item.commissionEmployee ? { commissionEmployee: item.commissionEmployee } : {}),
+        ...(item.commissionPercent !== undefined ? { commissionPercent: item.commissionPercent } : {}),
+        ...(item.commissionAmount !== undefined ? { commissionAmount: item.commissionAmount } : {}),
       })),
       total: order.total,
       savings: order.savings,
@@ -645,6 +697,14 @@ export default function App() {
   const undoOrderDelivery = (orderId: string) => {
     const order = data.orders.find((item) => item.id === orderId);
     if (!order || order.status !== 'delivered') return;
+    const linkedSale = data.sales.find((sale) => sale.id === order.saleId);
+    if (linkedSale?.items.some((item) => item.commissionPaidDate)) {
+      Alert.alert(
+        'Não é possível desfazer a entrega',
+        'Já existe uma comissão marcada como paga neste pedido. A entrega não pode ser desfeita para preservar o histórico financeiro.',
+      );
+      return;
+    }
     setData((current) => {
       const currentOrder = current.orders.find((item) => item.id === orderId);
       if (!currentOrder || currentOrder.status !== 'delivered') return current;
@@ -673,6 +733,26 @@ export default function App() {
       };
     });
     setMonth(new Date());
+  };
+
+  const markCommissionPaid = (saleId: string, itemIndex: number) => {
+    const paidDate = localDateKey(new Date());
+    setData((current) => ({
+      ...current,
+      sales: current.sales.map((sale) => sale.id !== saleId
+        ? sale
+        : {
+          ...sale,
+          items: sale.items.map((item, index) =>
+            index === itemIndex
+              && item.commissionEmployee
+              && (item.commissionAmount ?? 0) > 0
+              && !item.commissionPaidDate
+              ? { ...item, commissionPaidDate: paidDate }
+              : item,
+          ),
+        }),
+    }));
   };
 
   const saveExpense = () => {
@@ -793,6 +873,7 @@ export default function App() {
     { key: 'home', icon: '⌂', label: 'Início' },
     { key: 'products', icon: '▦', label: 'Produtos' },
     { key: 'sales', icon: '↗', label: 'Vendas' },
+    { key: 'commissions', icon: '%', label: 'Comissões' },
     { key: 'orders', icon: '▣', label: 'Pedidos' },
     { key: 'supplies', icon: '▤', label: 'Insumos' },
     { key: 'alerts', icon: '!', label: 'Alertas' },
@@ -1420,6 +1501,32 @@ export default function App() {
                   </View>
                   {renderField('Notificar estoque quando chegar a', lowStockAt, setLowStockAt, '2 unidades', 'number-pad')}
                   <Text style={styles.fieldHint}>Você receberá um alerta quando o estoque atingir este limite.</Text>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Funcionário que fabricou <Text style={styles.optionalLabel}>(opcional)</Text></Text>
+                    {(data.company?.employees ?? []).length > 0 ? (
+                      <View style={styles.choiceRow}>
+                        <Pressable
+                          onPress={() => setProductMakerEmployee('')}
+                          style={[styles.choiceChip, productMakerEmployee === '' && styles.choiceChipSelected]}
+                        >
+                          <Text style={[styles.choiceText, productMakerEmployee === '' && styles.choiceTextSelected]}>Não definido</Text>
+                        </Pressable>
+                        {data.company?.employees.map((employee) => (
+                          <Pressable
+                            key={employee}
+                            onPress={() => setProductMakerEmployee(employee)}
+                            style={[styles.choiceChip, productMakerEmployee === employee && styles.choiceChipSelected]}
+                          >
+                            <Text style={[styles.choiceText, productMakerEmployee === employee && styles.choiceTextSelected]}>{employee}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.fieldHint}>Cadastre funcionários no perfil da empresa para atribuir uma comissão.</Text>
+                    )}
+                  </View>
+                  {renderField('Comissão por venda (%)', productCommissionPercent, setProductCommissionPercent, 'Ex.: 10', 'decimal-pad')}
+                  <Text style={styles.fieldHint}>A comissão é calculada sobre o valor final do item, depois dos descontos, e pertence a quem fabricou.</Text>
                   {renderChoices(
                     'Oferta no produto',
                     ['Sem oferta', 'Porcentagem', 'Valor em R$'],
@@ -1718,6 +1825,9 @@ export default function App() {
                   />
                 ) : null}
                 {tab === 'sales' ? renderSales() : null}
+                {tab === 'commissions' ? (
+                  <CommissionsScreen sales={data.sales} onMarkPaid={markCommissionPaid} />
+                ) : null}
                 {tab === 'orders' ? renderOrders() : null}
                 {tab === 'supplies' ? renderSupplies() : null}
                 {tab === 'alerts' ? (
@@ -1738,7 +1848,9 @@ export default function App() {
                     return (
                       <Pressable key={item.key} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setTab(item.key)} style={styles.navItem}>
                         <Text style={[styles.navIcon, selected && styles.navIconSelected]}>{item.icon}</Text>
-                        <Text style={[styles.navLabel, selected && styles.navLabelSelected]}>{item.label}</Text>
+                        <Text style={[styles.navLabel, selected && styles.navLabelSelected, item.key === 'commissions' && styles.navLabelCompact]}>
+                          {item.label}
+                        </Text>
                         {selected ? <View style={styles.navIndicator} /> : null}
                       </Pressable>
                     );
