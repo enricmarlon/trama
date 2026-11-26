@@ -109,10 +109,5 @@ export type Palette = {
   canvasShade: string;
 };
 
-export type ThemeContextValue<TStyles> = {
-  palette: Palette;
-  styles: TStyles;
-};
-
 export type Tab = 'home' | 'products' | 'sales' | 'orders' | 'supplies' | 'management';
 export type FormType = 'product' | 'sale' | 'order' | 'expense' | 'supply' | 'offer' | null;
