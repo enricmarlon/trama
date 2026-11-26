@@ -48,6 +48,8 @@ type CustomerOrderItem = {
   productId: string;
   name: string;
   quantity: number;
+  unitPrice: number;
+  lineDiscount?: number;
 };
 
 type CustomerOrder = {
@@ -58,7 +60,10 @@ type CustomerOrder = {
   deliveryDate: string;
   alertDays?: number;
   items: CustomerOrderItem[];
+  total: number;
+  savings: number;
   status: 'pending' | 'delivered';
+  saleId?: string;
 };
 
 type Expense = {
@@ -380,6 +385,7 @@ export default function App() {
   const [orderDeliveryDate, setOrderDeliveryDate] = useState('');
   const [orderAlertDays, setOrderAlertDays] = useState('');
   const [orderCart, setOrderCart] = useState<Record<string, number>>({});
+  const [orderCartDiscounts, setOrderCartDiscounts] = useState<Record<string, string>>({});
   const [businessType, setBusinessType] = useState('Ateliê');
   const [customBusinessType, setCustomBusinessType] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -400,7 +406,40 @@ export default function App() {
       .then((saved) => {
         if (saved && active) {
           const savedData = JSON.parse(saved) as Partial<StoreData>;
-          setData({ ...initialData, ...savedData, orders: savedData.orders ?? [], supplies: savedData.supplies ?? [] });
+          const products = savedData.products ?? [];
+          const offers = savedData.offers ?? [];
+          const migratedOrders = (savedData.orders ?? []).map((order) => {
+            const items = order.items.map((item) => {
+              const product = products.find((candidate) => candidate.id === item.productId);
+              const offer = offers.find((candidate) => candidate.productId === item.productId && candidate.active);
+              const currentUnitPrice = product
+                ? Math.max(0, product.price - (offer
+                  ? offer.discountType === 'percent' ? (product.price * offer.value) / 100 : offer.value
+                  : 0))
+                : 0;
+              return {
+                ...item,
+                unitPrice: item.unitPrice ?? currentUnitPrice,
+                lineDiscount: item.lineDiscount ?? 0,
+              };
+            });
+            const total = order.total ?? items.reduce(
+              (sum, item) => sum + Math.max(0, item.unitPrice * item.quantity - item.lineDiscount),
+              0,
+            );
+            const savings = order.savings ?? items.reduce((sum, item) => {
+              const product = products.find((candidate) => candidate.id === item.productId);
+              const originalTotal = (product?.price ?? item.unitPrice) * item.quantity;
+              return sum + originalTotal - Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
+            }, 0);
+            return { ...order, items, total, savings };
+          });
+          setData({
+            ...initialData,
+            ...savedData,
+            orders: migratedOrders,
+            supplies: savedData.supplies ?? [],
+          });
         }
       })
       .catch(() => {
@@ -482,6 +521,7 @@ export default function App() {
       setOrderDeliveryDate('');
       setOrderAlertDays('');
       setOrderCart({});
+      setOrderCartDiscounts({});
     }
     if (next === 'expense') {
       setExpenseName('');
@@ -682,11 +722,15 @@ export default function App() {
     const alertDays = hasAlertDays ? Number(orderAlertDays) : undefined;
     const items = data.products
       .filter((product) => (orderCart[product.id] ?? 0) > 0)
-      .map((product) => ({
-        productId: product.id,
-        name: product.name,
-        quantity: orderCart[product.id],
-      }));
+      .map((product) => {
+        const quantity = orderCart[product.id];
+        return {
+          product,
+          quantity,
+          unitPrice: priceFor(product),
+          lineDiscount: parseAmount(orderCartDiscounts[product.id] ?? ''),
+        };
+      });
 
     if (!customerName || !phone || !deliveryDate) {
       Alert.alert('Confira os dados do pedido', 'Informe o nome, o telefone do cliente e uma data válida para a entrega.');
@@ -704,6 +748,23 @@ export default function App() {
       Alert.alert('Pedido sem produtos', 'Selecione ao menos um produto para registrar o pedido.');
       return;
     }
+    const invalidDiscount = items.find((item) =>
+      item.lineDiscount < 0 || item.lineDiscount > item.unitPrice * item.quantity,
+    );
+    if (invalidDiscount) {
+      Alert.alert(
+        'Desconto inválido',
+        `O desconto de ${invalidDiscount.product.name} não pode ser maior que o total da linha (${money(invalidDiscount.unitPrice * invalidDiscount.quantity)}).`,
+      );
+      return;
+    }
+
+    const lineTotal = (item: typeof items[number]) =>
+      Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
+    const total = items.reduce((sum, item) => sum + lineTotal(item), 0);
+    const savings = items.reduce((sum, item) =>
+      sum + item.product.price * item.quantity - lineTotal(item),
+    0);
 
     const order: CustomerOrder = {
       id: `r${today}-${data.orders.length + 1}`,
@@ -712,7 +773,15 @@ export default function App() {
       createdDate: today,
       deliveryDate,
       ...(alertDays !== undefined ? { alertDays } : {}),
-      items,
+      items: items.map(({ product, quantity, unitPrice, lineDiscount }) => ({
+        productId: product.id,
+        name: product.name,
+        quantity,
+        unitPrice,
+        ...(lineDiscount > 0 ? { lineDiscount } : {}),
+      })),
+      total,
+      savings,
       status: 'pending',
     };
     setData((current) => ({ ...current, orders: [order, ...current.orders] }));
@@ -720,12 +789,83 @@ export default function App() {
   };
 
   const markOrderDelivered = (orderId: string) => {
-    setData((current) => ({
-      ...current,
-      orders: current.orders.map((order) =>
-        order.id === orderId ? { ...order, status: 'delivered' } : order,
-      ),
-    }));
+    const order = data.orders.find((item) => item.id === orderId);
+    if (!order || order.status !== 'pending') return;
+    const insufficient = order.items.find((item) => {
+      const product = data.products.find((candidate) => candidate.id === item.productId);
+      return product && product.stock < item.quantity;
+    });
+    if (insufficient) {
+      const product = data.products.find((item) => item.id === insufficient.productId);
+      Alert.alert(
+        'Estoque insuficiente',
+        `${product?.name ?? insufficient.name}: estoque disponível ${product?.stock ?? 0}, quantidade do pedido ${insufficient.quantity}. Reponha o estoque antes de marcar como entregue.`,
+      );
+      return;
+    }
+    const saleId = `order-sale-${order.id}`;
+    const sale: Sale = {
+      id: saleId,
+      date: today,
+      items: order.items.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        ...(item.lineDiscount ? { lineDiscount: item.lineDiscount } : {}),
+      })),
+      total: order.total,
+      savings: order.savings,
+    };
+    setData((current) => {
+      const currentOrder = current.orders.find((item) => item.id === orderId);
+      if (!currentOrder || currentOrder.status !== 'pending') return current;
+      return {
+        ...current,
+        orders: current.orders.map((item) =>
+          item.id === orderId ? { ...item, status: 'delivered', saleId } : item,
+        ),
+        sales: [sale, ...current.sales],
+        products: current.products.map((product) => {
+          const item = order.items.find((orderItem) => orderItem.productId === product.id);
+          return item ? { ...product, stock: product.stock - item.quantity } : product;
+        }),
+      };
+    });
+    setMonth(new Date());
+  };
+
+  const undoOrderDelivery = (orderId: string) => {
+    const order = data.orders.find((item) => item.id === orderId);
+    if (!order || order.status !== 'delivered') return;
+    setData((current) => {
+      const currentOrder = current.orders.find((item) => item.id === orderId);
+      if (!currentOrder || currentOrder.status !== 'delivered') return current;
+      const restoredQuantities = new Map<string, number>();
+      if (currentOrder.saleId) {
+        currentOrder.items.forEach((item) => {
+          restoredQuantities.set(
+            item.productId,
+            (restoredQuantities.get(item.productId) ?? 0) + item.quantity,
+          );
+        });
+      }
+      const pendingOrder = { ...currentOrder, status: 'pending' as const, saleId: undefined };
+      return {
+        ...current,
+        orders: current.orders.map((item) => item.id === orderId ? pendingOrder : item),
+        sales: currentOrder.saleId
+          ? current.sales.filter((saleItem) => saleItem.id !== currentOrder.saleId)
+          : current.sales,
+        products: currentOrder.saleId
+          ? current.products.map((product) => ({
+            ...product,
+            stock: product.stock + (restoredQuantities.get(product.id) ?? 0),
+          }))
+          : current.products,
+      };
+    });
+    setMonth(new Date());
   };
 
   const saveExpense = () => {
@@ -1274,6 +1414,10 @@ export default function App() {
               {order.alertDays !== undefined ? (
                 <Text style={styles.orderAlertSetting}>Alertar {order.alertDays} dia(s) antes</Text>
               ) : null}
+              <View style={styles.orderTotalRow}>
+                <Text style={styles.orderTotalLabel}>Total do pedido</Text>
+                <Text style={styles.orderTotalValue}>{money(order.total)}</Text>
+              </View>
               {order.status === 'pending' ? (
                 <Pressable
                   style={styles.orderCompleteButton}
@@ -1283,7 +1427,16 @@ export default function App() {
                 >
                   <Text style={styles.orderCompleteText}>Marcar como entregue</Text>
                 </Pressable>
-              ) : null}
+              ) : (
+                <Pressable
+                  style={styles.orderUndoButton}
+                  onPress={() => undoOrderDelivery(order.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Desfazer entrega do pedido de ${order.customerName}`}
+                >
+                  <Text style={styles.orderUndoText}>Desfazer entrega</Text>
+                </Pressable>
+              )}
             </View>
           );
         })}
@@ -1456,6 +1609,11 @@ export default function App() {
       const discount = parseAmount(cartDiscounts[product.id] ?? '');
       return sum + Math.max(0, priceFor(product) * quantity - discount);
     }, 0);
+    const orderTotal = data.products.reduce((sum, product) => {
+      const quantity = orderCart[product.id] ?? 0;
+      const discount = parseAmount(orderCartDiscounts[product.id] ?? '');
+      return sum + Math.max(0, priceFor(product) * quantity - discount);
+    }, 0);
     return (
       <Modal visible={form !== null} transparent animationType="slide" onRequestClose={closeForm}>
         <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1625,36 +1783,65 @@ export default function App() {
                     {data.products.map((product) => {
                       const quantity = orderCart[product.id] ?? 0;
                       return (
-                        <View key={product.id} style={styles.orderProductRow}>
-                          <ProductPicture product={product} />
-                          <View style={styles.cartProductCopy}>
-                            <Text style={styles.cartProductName}>{product.name}</Text>
-                            <Text style={styles.cartProductPrice}>
-                              {product.stock > 0 ? `${product.stock} disponível(is)` : 'Sem estoque · sob encomenda'}
-                            </Text>
+                        <View key={product.id} style={styles.cartProduct}>
+                          <View style={styles.cartProductMain}>
+                            <ProductPicture product={product} />
+                            <View style={styles.cartProductCopy}>
+                              <Text style={styles.cartProductName}>{product.name}</Text>
+                              <Text style={styles.cartProductPrice}>
+                                {money(priceFor(product))} · {product.stock > 0 ? `${product.stock} disponível(is)` : 'sob encomenda'}
+                                {offerFor(product.id) ? ' · oferta' : ''}
+                              </Text>
+                            </View>
+                            <View style={styles.quantityStepper}>
+                              <Pressable
+                                style={styles.stepButton}
+                                onPress={() => {
+                                  const nextQuantity = Math.max(0, quantity - 1);
+                                  setOrderCart((current) => ({ ...current, [product.id]: nextQuantity }));
+                                  if (nextQuantity === 0) setOrderCartDiscounts((current) => ({ ...current, [product.id]: '' }));
+                                }}
+                                accessibilityLabel={`Remover uma unidade de ${product.name} do pedido`}
+                              >
+                                <Text style={styles.stepText}>−</Text>
+                              </Pressable>
+                              <Text style={styles.cartQuantity}>{quantity}</Text>
+                              <Pressable
+                                style={styles.stepButton}
+                                onPress={() => setOrderCart((current) => ({ ...current, [product.id]: quantity + 1 }))}
+                                accessibilityLabel={`Adicionar uma unidade de ${product.name} ao pedido`}
+                              >
+                                <Text style={styles.stepText}>+</Text>
+                              </Pressable>
+                            </View>
                           </View>
-                          <View style={styles.quantityStepper}>
-                            <Pressable
-                              style={styles.stepButton}
-                              onPress={() => setOrderCart((current) => ({ ...current, [product.id]: Math.max(0, quantity - 1) }))}
-                              accessibilityLabel={`Remover uma unidade de ${product.name} do pedido`}
-                            >
-                              <Text style={styles.stepText}>−</Text>
-                            </Pressable>
-                            <Text style={styles.cartQuantity}>{quantity}</Text>
-                            <Pressable
-                              style={styles.stepButton}
-                              onPress={() => setOrderCart((current) => ({ ...current, [product.id]: quantity + 1 }))}
-                              accessibilityLabel={`Adicionar uma unidade de ${product.name} ao pedido`}
-                            >
-                              <Text style={styles.stepText}>+</Text>
-                            </Pressable>
-                          </View>
+                          {quantity > 0 ? (
+                            <View style={styles.cartDiscountRow}>
+                              <View style={styles.cartDiscountCopy}>
+                                <Text style={styles.cartDiscountLabel}>Desconto adicional (R$)</Text>
+                                <Text style={styles.cartDiscountHint}>Valor total desta linha; soma à oferta.</Text>
+                              </View>
+                              <TextInput
+                                value={orderCartDiscounts[product.id] ?? ''}
+                                onChangeText={(value) => setOrderCartDiscounts((current) => ({ ...current, [product.id]: value }))}
+                                placeholder="0,00"
+                                placeholderTextColor={palette.muted}
+                                keyboardType="decimal-pad"
+                                style={styles.cartDiscountInput}
+                                accessibilityLabel={`Desconto total em reais para ${product.name} no pedido`}
+                              />
+                            </View>
+                          ) : null}
                         </View>
                       );
                     })}
                     {data.products.length === 0 ? <Text style={styles.emptyText}>Cadastre produtos antes de criar um pedido.</Text> : null}
                   </View>
+                  <View style={styles.cartTotal}>
+                    <Text style={styles.cartTotalLabel}>Total do pedido</Text>
+                    <Text style={styles.cartTotalValue}>{money(orderTotal)}</Text>
+                  </View>
+                  {activeOffers.length ? <Text style={styles.fieldHint}>Ofertas ativas já aplicadas; descontos manuais são adicionais.</Text> : null}
                 </>
               ) : null}
               {form === 'expense' ? (
@@ -1943,9 +2130,13 @@ function createStyles(COLORS: Palette) {
   orderDeliveryDate: { color: COLORS.muted, fontSize: 10 },
   orderCountdown: { color: COLORS.green, fontSize: 12, fontWeight: '700' },
   orderAlertSetting: { color: COLORS.muted, fontSize: 9 },
+  orderTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 9, marginTop: 2 },
+  orderTotalLabel: { color: COLORS.ink, fontSize: 11, fontWeight: '600' },
+  orderTotalValue: { color: COLORS.green, fontSize: 14, fontWeight: '700' },
   orderCompleteButton: { alignSelf: 'flex-start', borderRadius: 9, backgroundColor: COLORS.paleGreen, paddingHorizontal: 10, paddingVertical: 8, marginTop: 3 },
   orderCompleteText: { color: COLORS.green, fontSize: 10, fontWeight: '700' },
-  orderProductRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  orderUndoButton: { alignSelf: 'flex-start', borderRadius: 9, backgroundColor: COLORS.paleOrange, paddingHorizontal: 10, paddingVertical: 8, marginTop: 3 },
+  orderUndoText: { color: COLORS.secondaryDeep, fontSize: 10, fontWeight: '700' },
   financeCard: { backgroundColor: COLORS.white, borderRadius: 18, padding: 17, marginBottom: 13 },
   financeEyebrow: { color: COLORS.muted, fontSize: 9, fontWeight: '700', letterSpacing: 1.1, marginBottom: 14 },
   financeLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 6 },
