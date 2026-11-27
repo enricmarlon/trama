@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ActionButton from '../components/ActionButton';
 import ProductPicture from '../components/ProductPicture';
 import { ThemeContext } from '../theme/ThemeContext';
@@ -105,6 +106,7 @@ export type FormModalProps = Pick<StoreDataState,
 
 export default function FormModal(props: FormModalProps) {
   const { palette, styles } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const {
     form,
     editingProductId,
@@ -237,7 +239,7 @@ export default function FormModal(props: FormModalProps) {
       <Modal visible={form !== null} transparent animationType="slide" onRequestClose={closeForm}>
         <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <Pressable style={styles.modalBackdrop} onPress={closeForm} />
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: insets.bottom + (Platform.OS === 'ios' ? 24 : 14) }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{title}</Text>
