@@ -16,7 +16,15 @@
         }
       ],
       "expo-sharing",
-      "expo-background-task"
+      "expo-background-task",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraProguardRules": "-keep class androidx.work.impl.WorkDatabase_Impl { *; }"
+          }
+        }
+      ]
     ],
     "ios": {
       "bundleIdentifier": "com.anonymous.trama",
