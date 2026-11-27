@@ -28,7 +28,10 @@
     ],
     "ios": {
       "bundleIdentifier": "com.anonymous.trama",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -42,6 +45,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "16f23e1a-6cc7-4b64-9dac-447466255260"
+      }
     }
   }
 }
