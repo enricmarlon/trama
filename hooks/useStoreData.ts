@@ -4,7 +4,7 @@ import { File } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 import {
   DEFAULT_PALETTE,
   DEFAULT_PRODUCT_CATEGORIES,
@@ -27,6 +27,7 @@ import type {
   CompanyProfile,
   CustomerOrder,
   Expense,
+  DriveBackupSettings,
   FormType,
   Offer,
   Product,
@@ -36,32 +37,31 @@ import type {
   Tab,
 } from '../types';
 import { createBackupFile, persistProductImage, readBackupFile } from '../backup';
+import {
+  createDriveBackup,
+  connectGoogleDrive,
+  DEFAULT_DRIVE_BACKUP_SETTINGS,
+  disconnectGoogleDrive,
+  getGoogleDriveAccountEmail,
+  isGoogleDriveConfigured,
+  readDriveBackupSettings,
+  saveDriveBackupSettings,
+} from '../services/googleDriveBackup';
+import {
+  ensureDailyDriveBackupTask,
+  unregisterDailyDriveBackupTask,
+} from '../services/driveBackupTask';
+import { normalizeStoreData } from '../storeData';
 
-export function normalizeStoreData(savedData: Partial<StoreData>): StoreData {
-  const products = savedData.products ?? [];
-  const supplies = savedData.supplies ?? [];
-  return {
-    ...initialData,
-    ...savedData,
-    products,
-    supplies,
-    productCategories: [...new Set([
-      ...DEFAULT_PRODUCT_CATEGORIES,
-      ...(savedData.productCategories ?? []),
-      ...products.map((product) => product.category),
-    ])],
-    supplyCategories: [...new Set([
-      ...DEFAULT_SUPPLY_CATEGORIES,
-      ...(savedData.supplyCategories ?? []),
-      ...supplies.flatMap((supply) => supply.category ? [supply.category] : []),
-    ])],
-  };
-}
+export { normalizeStoreData } from '../storeData';
 
 export default function useStoreData() {
   const [data, setData] = useState<StoreData>(initialData);
   const [loaded, setLoaded] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [driveBackupBusy, setDriveBackupBusy] = useState(false);
+  const [driveBackupSettings, setDriveBackupSettings] = useState<DriveBackupSettings>(DEFAULT_DRIVE_BACKUP_SETTINGS);
+  const [driveBackupSettingsLoaded, setDriveBackupSettingsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [form, setForm] = useState<FormType>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -153,6 +153,62 @@ export default function useStoreData() {
       });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    readDriveBackupSettings()
+      .then(async (settings) => {
+        const accountEmail = await getGoogleDriveAccountEmail();
+        const refreshedSettings = accountEmail === settings.accountEmail
+          ? settings
+          : { ...settings, accountEmail };
+        if (refreshedSettings !== settings) await saveDriveBackupSettings(refreshedSettings);
+        if (active) setDriveBackupSettings(refreshedSettings);
+      })
+      .catch((error: unknown) => {
+        Alert.alert(
+          'Não foi possível carregar as configurações de backup',
+          error instanceof Error ? error.message : 'Tente abrir as configurações novamente.',
+        );
+      })
+      .finally(() => {
+        if (active) setDriveBackupSettingsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !driveBackupSettingsLoaded || !driveBackupSettings.enabled) return;
+    ensureDailyDriveBackupTask().catch((error: unknown) => {
+      Alert.alert(
+        'Não foi possível agendar o backup',
+        error instanceof Error ? error.message : 'Revise as permissões e tente novamente.',
+      );
+    });
+  }, [loaded, driveBackupSettingsLoaded, driveBackupSettings.enabled]);
+
+  useEffect(() => {
+    let active = true;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      readDriveBackupSettings()
+        .then((settings) => {
+          if (active) setDriveBackupSettings(settings);
+        })
+        .catch((error: unknown) => {
+          Alert.alert(
+            'Não foi possível atualizar o status do backup',
+            error instanceof Error ? error.message : 'Tente abrir as configurações novamente.',
+          );
+        });
+    });
+    return () => {
+      active = false;
+      subscription.remove();
     };
   }, []);
 
@@ -1342,11 +1398,177 @@ export default function useStoreData() {
   const changeMonth = (adjustment: number) =>
     setMonth((current) => new Date(current.getFullYear(), current.getMonth() + adjustment, 1));
 
+  const connectDriveAccount = async () => {
+    if (driveBackupBusy) return;
+    if (!isGoogleDriveConfigured()) {
+      Alert.alert(
+        'Configure o Google Drive',
+        'O backup no Google Drive exige um development build e não funciona no Expo Go. Configure também os IDs OAuth e gere um novo aplicativo. Consulte as instruções nesta seção.',
+      );
+      return;
+    }
+
+    setDriveBackupBusy(true);
+    try {
+      const accountEmail = await connectGoogleDrive();
+      const nextSettings = {
+        ...driveBackupSettings,
+        accountEmail,
+        lastBackupError: null,
+      };
+      await saveDriveBackupSettings(nextSettings);
+      setDriveBackupSettings(nextSettings);
+      Alert.alert('Google Drive conectado', 'A conta está autorizada para criar backups do Trama.');
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível conectar ao Google Drive',
+        error instanceof Error ? error.message : 'Confira a configuração da conta Google e tente novamente.',
+      );
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  };
+
+  const disconnectDriveAccount = async () => {
+    if (driveBackupBusy) return;
+    setDriveBackupBusy(true);
+    const disabledSettings = { ...driveBackupSettings, enabled: false };
+    try {
+      await saveDriveBackupSettings(disabledSettings);
+      setDriveBackupSettings(disabledSettings);
+      await unregisterDailyDriveBackupTask();
+      await disconnectGoogleDrive();
+      const disconnectedSettings = { ...disabledSettings, accountEmail: null };
+      await saveDriveBackupSettings(disconnectedSettings);
+      setDriveBackupSettings(disconnectedSettings);
+      Alert.alert('Google Drive desconectado', 'Os backups automáticos foram desativados.');
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível desconectar o Google Drive',
+        error instanceof Error ? error.message : 'Tente novamente.',
+      );
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  };
+
+  const updateDriveBackupTime = async (time: string) => {
+    if (driveBackupBusy) return;
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      Alert.alert('Horário inválido', 'Informe o horário no formato de 24 horas, como 08:30.');
+      return;
+    }
+
+    setDriveBackupBusy(true);
+    try {
+      const nextSettings = { ...driveBackupSettings, time };
+      await saveDriveBackupSettings(nextSettings);
+      setDriveBackupSettings(nextSettings);
+      Alert.alert('Horário atualizado', `O backup será tentado diariamente após ${time}.`);
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível salvar o horário',
+        error instanceof Error ? error.message : 'Tente novamente.',
+      );
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  };
+
+  const toggleDriveBackup = async (enabled: boolean) => {
+    if (driveBackupBusy) return;
+    if (enabled && !isGoogleDriveConfigured()) {
+      Alert.alert(
+        'Configure o Google Drive',
+        'O backup no Google Drive exige um development build e não funciona no Expo Go. Configure também os IDs OAuth antes de ativar os backups automáticos.',
+      );
+      return;
+    }
+    if (enabled && !driveBackupSettings.accountEmail) {
+      Alert.alert('Conecte uma conta Google', 'Conecte o Google Drive antes de ativar o backup diário.');
+      return;
+    }
+
+    setDriveBackupBusy(true);
+    try {
+      const nextSettings = { ...driveBackupSettings, enabled };
+      if (enabled) {
+        await ensureDailyDriveBackupTask();
+        await saveDriveBackupSettings(nextSettings);
+      } else {
+        await saveDriveBackupSettings(nextSettings);
+        await unregisterDailyDriveBackupTask();
+      }
+      setDriveBackupSettings(nextSettings);
+      Alert.alert(
+        enabled ? 'Backup automático ativado' : 'Backup automático desativado',
+        enabled
+          ? `O sistema tentará enviar um backup após ${nextSettings.time} todos os dias.`
+          : 'Nenhum novo backup será agendado.',
+      );
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível atualizar o backup automático',
+        error instanceof Error ? error.message : 'Tente novamente.',
+      );
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  };
+
+  const runDriveBackupNow = async () => {
+    if (driveBackupBusy) return;
+    if (!isGoogleDriveConfigured() || !driveBackupSettings.accountEmail) {
+      Alert.alert('Conecte o Google Drive', 'Configure e conecte uma conta Google antes de enviar o backup.');
+      return;
+    }
+
+    setDriveBackupBusy(true);
+    try {
+      const now = new Date();
+      await createDriveBackup(data, now);
+      const nextSettings = {
+        ...driveBackupSettings,
+        lastBackupAt: now.toISOString(),
+        lastBackupError: null,
+      };
+      setDriveBackupSettings(nextSettings);
+      try {
+        await saveDriveBackupSettings(nextSettings);
+      } catch (error) {
+        Alert.alert(
+          'Backup enviado, mas status não salvo',
+          error instanceof Error ? error.message : 'A cópia está no Drive, mas o status local não foi atualizado.',
+        );
+        return;
+      }
+      Alert.alert('Backup enviado', 'Uma cópia dos dados e das fotos foi salva no Google Drive.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Tente novamente.';
+      const nextSettings = { ...driveBackupSettings, lastBackupError: message };
+      try {
+        await saveDriveBackupSettings(nextSettings);
+        setDriveBackupSettings(nextSettings);
+      } catch (saveError) {
+        Alert.alert(
+          'Falha ao registrar o erro',
+          saveError instanceof Error ? saveError.message : 'O status do backup não pôde ser salvo.',
+        );
+      }
+      Alert.alert('Não foi possível enviar o backup', message);
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  };
+
   return {
     data,
     setData,
     loaded,
     backupBusy,
+    driveBackupBusy,
+    driveBackupSettings,
+    googleDriveConfigured: isGoogleDriveConfigured(),
     tab,
     setTab,
     form,
@@ -1474,6 +1696,11 @@ export default function useStoreData() {
     saveCompanyProfile,
     exportBackup,
     importBackup,
+    connectDriveAccount,
+    disconnectDriveAccount,
+    updateDriveBackupTime,
+    toggleDriveBackup,
+    runDriveBackupNow,
     editCompanyProfile,
     choosePhoto,
     saveProduct,

@@ -15,9 +15,6 @@ type ManagementScreenProps = Pick<StoreState,
   | 'monthRevenue'
   | 'monthSpent'
   | 'openForm'
-  | 'backupBusy'
-  | 'exportBackup'
-  | 'importBackup'
   | 'monthExpenses'
   | 'openExpenseForEditing'
   | 'deleteExpense'
@@ -32,9 +29,6 @@ export default function ManagementScreen({
   monthRevenue,
   monthSpent,
   openForm,
-  backupBusy,
-  exportBackup,
-  importBackup,
   monthExpenses,
   openExpenseForEditing,
   deleteExpense,
@@ -67,22 +61,6 @@ export default function ManagementScreen({
         <ActionButton label="+ Registrar gasto" onPress={() => openForm('expense')} secondary />
         <ActionButton label="+ Criar oferta" onPress={() => openForm('offer')} secondary />
       </View>
-      <SectionTitle title="Backup e restauração" />
-      <View style={styles.managementActions}>
-        <ActionButton
-          label={backupBusy ? 'Processando...' : 'Exportar backup'}
-          onPress={() => void exportBackup()}
-          secondary
-          compact
-        />
-        <ActionButton
-          label={backupBusy ? 'Processando...' : 'Importar backup'}
-          onPress={importBackup}
-          secondary
-          compact
-        />
-      </View>
-      <Text style={styles.fieldHint}>O backup inclui os registros e as fotos dos produtos.</Text>
       <SectionTitle title="Gastos com materiais" action="Adicionar" onPress={() => openForm('expense')} />
       <View style={styles.listCard}>
         {monthExpenses.map((expense, index) => (

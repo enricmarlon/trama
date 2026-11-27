@@ -192,9 +192,6 @@ export default function App() {
                     monthRevenue={storeData.monthRevenue}
                     monthSpent={storeData.monthSpent}
                     openForm={storeData.openForm}
-                    backupBusy={storeData.backupBusy}
-                    exportBackup={storeData.exportBackup}
-                    importBackup={storeData.importBackup}
                     monthExpenses={storeData.monthExpenses}
                     openExpenseForEditing={storeData.openExpenseForEditing}
                     deleteExpense={storeData.deleteExpense}
@@ -213,6 +210,17 @@ export default function App() {
                     onAddEmployee={storeData.addManagedEmployee}
                     onRenameEmployee={storeData.renameManagedEmployee}
                     onRemoveEmployee={storeData.removeManagedEmployee}
+                    backupBusy={storeData.backupBusy}
+                    exportBackup={storeData.exportBackup}
+                    importBackup={storeData.importBackup}
+                    driveBackupBusy={storeData.driveBackupBusy}
+                    driveBackupSettings={storeData.driveBackupSettings}
+                    googleDriveConfigured={storeData.googleDriveConfigured}
+                    onConnectDrive={storeData.connectDriveAccount}
+                    onDisconnectDrive={storeData.disconnectDriveAccount}
+                    onSaveDriveBackupTime={storeData.updateDriveBackupTime}
+                    onToggleDriveBackup={storeData.toggleDriveBackup}
+                    onRunDriveBackupNow={storeData.runDriveBackupNow}
                   />
                 ) : null}
               </ScrollView>

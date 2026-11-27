@@ -103,6 +103,14 @@ export type CompanyProfile = {
   employees: string[];
 };
 
+export type DriveBackupSettings = {
+  enabled: boolean;
+  time: string;
+  accountEmail: string | null;
+  lastBackupAt: string | null;
+  lastBackupError: string | null;
+};
+
 export type Palette = {
   ink: string;
   muted: string;

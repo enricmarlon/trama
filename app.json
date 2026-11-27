@@ -15,9 +15,11 @@
           "cameraPermission": "Permita que o Trama use a câmera para fotografar os produtos."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-background-task"
     ],
     "ios": {
+      "bundleIdentifier": "com.anonymous.trama",
       "supportsTablet": true
     },
     "android": {

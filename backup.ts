@@ -146,7 +146,7 @@ function isCompanyProfile(value: unknown): value is CompanyProfile {
     && value.employees.every(isString);
 }
 
-function isStoreData(value: unknown): value is StoreData {
+export function isStoreData(value: unknown): value is StoreData {
   return isRecord(value)
     && Array.isArray(value.products)
     && value.products.every(isProduct)

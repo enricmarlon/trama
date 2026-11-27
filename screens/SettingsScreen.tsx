@@ -1,8 +1,9 @@
 import { useContext, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import ActionButton from '../components/ActionButton';
 import SectionTitle from '../components/SectionTitle';
 import { ThemeContext } from '../theme/ThemeContext';
-import type { CategoryKind } from '../types';
+import type { CategoryKind, DriveBackupSettings } from '../types';
 
 type SettingsScreenProps = {
   productCategories: string[];
@@ -14,6 +15,17 @@ type SettingsScreenProps = {
   onAddEmployee: (name: string) => boolean;
   onRenameEmployee: (oldName: string, newName: string) => boolean;
   onRemoveEmployee: (name: string) => void;
+  backupBusy: boolean;
+  exportBackup: () => Promise<void>;
+  importBackup: () => void;
+  driveBackupBusy: boolean;
+  driveBackupSettings: DriveBackupSettings;
+  googleDriveConfigured: boolean;
+  onConnectDrive: () => Promise<void>;
+  onDisconnectDrive: () => Promise<void>;
+  onSaveDriveBackupTime: (time: string) => Promise<void>;
+  onToggleDriveBackup: (enabled: boolean) => Promise<void>;
+  onRunDriveBackupNow: () => Promise<void>;
 };
 
 export default function SettingsScreen({
@@ -26,6 +38,17 @@ export default function SettingsScreen({
   onAddEmployee,
   onRenameEmployee,
   onRemoveEmployee,
+  backupBusy,
+  exportBackup,
+  importBackup,
+  driveBackupBusy,
+  driveBackupSettings,
+  googleDriveConfigured,
+  onConnectDrive,
+  onDisconnectDrive,
+  onSaveDriveBackupTime,
+  onToggleDriveBackup,
+  onRunDriveBackupNow,
 }: SettingsScreenProps) {
   const { palette, styles } = useContext(ThemeContext);
   const [categoryDrafts, setCategoryDrafts] = useState<Record<CategoryKind, string>>({
@@ -39,6 +62,11 @@ export default function SettingsScreen({
   } | null>(null);
   const [employeeDraft, setEmployeeDraft] = useState('');
   const [editingEmployee, setEditingEmployee] = useState<{ oldName: string; newName: string } | null>(null);
+  const [backupTimeDraft, setBackupTimeDraft] = useState<string | null>(null);
+  const backupTime = backupTimeDraft ?? driveBackupSettings.time;
+  const lastBackupDate = driveBackupSettings.lastBackupAt
+    ? new Date(driveBackupSettings.lastBackupAt)
+    : null;
 
   const addCategory = (kind: CategoryKind) => {
     if (onAddCategory(kind, categoryDrafts[kind])) {
@@ -249,6 +277,113 @@ export default function SettingsScreen({
         >
           <Text style={styles.addEmployeeText}>+</Text>
         </Pressable>
+      </View>
+
+      <SectionTitle title="Backup e restauração" />
+      <Text style={styles.fieldHint}>O arquivo JSON inclui os registros e as fotos dos produtos.</Text>
+      <View style={styles.managementActions}>
+        <ActionButton
+          label={backupBusy ? 'Processando...' : 'Exportar backup'}
+          onPress={() => void exportBackup()}
+          secondary
+          compact
+        />
+        <ActionButton
+          label={backupBusy ? 'Processando...' : 'Importar backup'}
+          onPress={importBackup}
+          secondary
+          compact
+        />
+      </View>
+
+      <SectionTitle title="Backup diário no Google Drive" />
+      {!googleDriveConfigured ? (
+        <Text style={styles.fieldHint}>
+          O Google Drive requer um development build e não funciona no Expo Go, pois depende de um módulo nativo.
+          Em um build próprio, configure EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID e, no iOS,
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID. Crie um projeto Google Cloud, ative a Drive API
+          e cadastre os clientes OAuth para Android (com.anonymous.trama e o SHA-1 da assinatura)
+          e iOS. Depois gere um novo build do aplicativo.
+        </Text>
+      ) : null}
+      <View style={styles.listCard}>
+        <View style={styles.settingsRow}>
+          <View style={styles.backupSettingsCopy}>
+            <Text style={styles.settingsRowName}>
+              {driveBackupSettings.accountEmail
+                ? `Conectado: ${driveBackupSettings.accountEmail}`
+                : 'Nenhuma conta Google conectada'}
+            </Text>
+            <Text style={styles.fieldHint}>
+              {driveBackupSettings.enabled ? 'Backup automático ativado' : 'Backup automático desativado'}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => void (driveBackupSettings.accountEmail ? onDisconnectDrive() : onConnectDrive())}
+            style={styles.saleActionButton}
+            accessibilityRole="button"
+            accessibilityLabel={driveBackupSettings.accountEmail ? 'Desconectar Google Drive' : 'Conectar Google Drive'}
+          >
+            <Text style={styles.saleActionText}>
+              {driveBackupBusy ? 'Aguarde...' : driveBackupSettings.accountEmail ? 'Desconectar' : 'Conectar'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.settingsRow, styles.rowDivider]}>
+          <Text style={styles.settingsRowName}>Horário preferido</Text>
+          <TextInput
+            value={backupTime}
+            onChangeText={setBackupTimeDraft}
+            placeholder="21:00"
+            placeholderTextColor={palette.muted}
+            style={[styles.settingsRowInput, styles.backupTimeInput]}
+            keyboardType="numbers-and-punctuation"
+            maxLength={5}
+            accessibilityLabel="Horário diário do backup"
+          />
+          <Pressable
+            onPress={() => void onSaveDriveBackupTime(backupTime)}
+            style={styles.saleActionButton}
+            accessibilityRole="button"
+            accessibilityLabel="Salvar horário do backup"
+          >
+            <Text style={styles.saleActionText}>Salvar</Text>
+          </Pressable>
+        </View>
+
+        <Text style={[styles.fieldHint, styles.backupSettingsHint]}>
+          O horário é uma preferência: Android e iOS decidem quando executar tarefas em segundo plano.
+          A rotina pode atrasar e depende de rede, bateria e permissões do sistema.
+        </Text>
+        {driveBackupSettings.lastBackupAt ? (
+          <Text style={styles.fieldHint}>
+            Último backup: {lastBackupDate && !Number.isNaN(lastBackupDate.getTime())
+              ? lastBackupDate.toLocaleString('pt-BR')
+              : 'data indisponível'}
+          </Text>
+        ) : (
+          <Text style={styles.fieldHint}>Nenhum backup enviado ainda.</Text>
+        )}
+        {driveBackupSettings.lastBackupError ? (
+          <Text style={[styles.fieldHint, styles.backupErrorText]}>
+            Última falha: {driveBackupSettings.lastBackupError}
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.managementActions}>
+        <ActionButton
+          label={driveBackupSettings.enabled ? 'Desativar backup diário' : 'Ativar backup diário'}
+          onPress={() => void onToggleDriveBackup(!driveBackupSettings.enabled)}
+          secondary
+          compact
+        />
+        <ActionButton
+          label={driveBackupBusy ? 'Enviando...' : 'Fazer backup agora'}
+          onPress={() => void onRunDriveBackupNow()}
+          secondary
+          compact
+        />
       </View>
       <View style={styles.bottomSpacer} />
     </>
