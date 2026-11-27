@@ -87,7 +87,7 @@ export function elapsedDays(startDate: string, endDate: string) {
   return Math.max(0, dateDifferenceInDays(startDate, endDate));
 }
 
-export function parseDeliveryDate(value: string) {
+export function parseDate(value: string) {
   const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
   if (!match) return null;
   const [, dayText, monthText, yearText] = match;
@@ -97,6 +97,10 @@ export function parseDeliveryDate(value: string) {
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return `${yearText}-${monthText}-${dayText}`;
+}
+
+export function parseDeliveryDate(value: string) {
+  return parseDate(value);
 }
 
 export function deliveryCountdown(days: number) {
@@ -123,6 +127,13 @@ export const parseAmount = (value: string) => {
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+export function formatDateInput(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
 
 export const formatDate = (value: string) =>
   new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });

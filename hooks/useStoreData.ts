@@ -19,6 +19,7 @@ import {
   localDateKey,
   money,
   parseAmount,
+  parseDate,
   parseDeliveryDate,
   sameMonth,
 } from '../utils';
@@ -93,6 +94,7 @@ export default function useStoreData() {
   const [discountValue, setDiscountValue] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [cartDiscounts, setCartDiscounts] = useState<Record<string, string>>({});
+  const [saleDate, setSaleDate] = useState('');
   const [orderCustomerName, setOrderCustomerName] = useState('');
   const [orderPhone, setOrderPhone] = useState('');
   const [orderDeliveryDate, setOrderDeliveryDate] = useState('');
@@ -243,7 +245,9 @@ export default function useStoreData() {
     && validSalesEmployeeFilter?.length === 0
     ? null
     : validSalesEmployeeFilter;
-  const monthSales = data.sales.filter((sale) => sameMonth(sale.date, month));
+  const monthSales = data.sales
+    .filter((sale) => sameMonth(sale.date, month))
+    .sort((first, second) => second.date.localeCompare(first.date));
   const reportSales = salesEmployeeOptions.length === 0 || activeSalesEmployeeFilter === null
     ? monthSales
     : monthSales.filter((sale) => sale.employeeName && activeSalesEmployeeFilter.includes(sale.employeeName));
@@ -296,6 +300,7 @@ export default function useStoreData() {
       setEditingSaleId(null);
       setCart({});
       setCartDiscounts({});
+      setSaleDate('');
       setSelectedEmployee('');
     }
     if (next === 'order') {
@@ -833,6 +838,15 @@ export default function useStoreData() {
       Alert.alert('Venda protegida', 'Esta venda tem uma comissão marcada como paga e não pode ser alterada.');
       return;
     }
+    const date = previousSale
+      ? previousSale.date
+      : saleDate.trim()
+        ? parseDate(saleDate)
+        : localDateKey(new Date());
+    if (!date) {
+      Alert.alert('Data inválida', 'Informe a data no formato DD/MM/AAAA ou deixe o campo em branco para usar hoje.');
+      return;
+    }
     const items = data.products
       .filter((product) => (cart[product.id] ?? 0) > 0)
       .map((product) => {
@@ -908,7 +922,7 @@ export default function useStoreData() {
       });
     const sale: Sale = {
       id: previousSale?.id ?? `s${Date.now()}`,
-      date: previousSale?.date ?? localDateKey(new Date()),
+      date,
       items: saleItems,
       total,
       savings,
@@ -943,7 +957,7 @@ export default function useStoreData() {
         ...current,
         sales: currentSale
           ? current.sales.map((item) => item.id === sale.id ? sale : item)
-          : [sale, ...current.sales],
+          : [sale, ...current.sales].sort((first, second) => second.date.localeCompare(first.date)),
         orders: currentSale
           ? current.orders.map((order) => order.saleId === sale.id
             ? { ...order, items: orderItems, total, savings }
@@ -955,7 +969,10 @@ export default function useStoreData() {
         }),
       };
     });
-    if (!previousSale) setMonth(new Date());
+    if (!previousSale) {
+      const [year, monthNumber] = sale.date.split('-').map(Number);
+      setMonth(new Date(year, monthNumber - 1, 1));
+    }
     closeForm();
   };
 
@@ -1653,6 +1670,8 @@ export default function useStoreData() {
     setEmployeeDraft,
     selectedEmployee,
     setSelectedEmployee,
+    saleDate,
+    setSaleDate,
     editingCompany,
     setEditingCompany,
     activeOffers,

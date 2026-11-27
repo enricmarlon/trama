@@ -4,7 +4,7 @@ import ActionButton from '../components/ActionButton';
 import SectionTitle from '../components/SectionTitle';
 import { ThemeContext } from '../theme/ThemeContext';
 import type useStoreData from '../hooks/useStoreData';
-import { formatDate, money } from '../utils';
+import { formatNumericDate, money } from '../utils';
 
 type StoreState = ReturnType<typeof useStoreData>;
 type SalesScreenProps = Pick<StoreState,
@@ -104,7 +104,7 @@ export default function SalesScreen({
               <View style={styles.recentSaleCopy}>
                 <Text style={styles.recentSaleName}>{sale.items.map((item) => item.name).join(', ')}</Text>
                 <Text style={styles.recentSaleDate}>
-                  {formatDate(sale.date)} · {sale.items.reduce((sum, item) => sum + item.quantity, 0)} item(ns)
+                  {formatNumericDate(sale.date)} · {sale.items.reduce((sum, item) => sum + item.quantity, 0)} item(ns)
                   {sale.employeeName ? ` · ${sale.employeeName}` : ''}
                 </Text>
                 {sale.savings > 0 ? <Text style={styles.savingsText}>Desconto de {money(sale.savings)}</Text> : null}

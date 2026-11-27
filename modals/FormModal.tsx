@@ -14,7 +14,7 @@ import ActionButton from '../components/ActionButton';
 import ProductPicture from '../components/ProductPicture';
 import { ThemeContext } from '../theme/ThemeContext';
 import type useStoreData from '../hooks/useStoreData';
-import { money, parseAmount, supplyDaysRemaining } from '../utils';
+import { formatDateInput, money, parseAmount, supplyDaysRemaining } from '../utils';
 
 type StoreDataState = ReturnType<typeof useStoreData>;
 
@@ -49,6 +49,8 @@ export type FormModalProps = Pick<StoreDataState,
   | 'editingSale'
   | 'selectedEmployee'
   | 'setSelectedEmployee'
+  | 'saleDate'
+  | 'setSaleDate'
   | 'cart'
   | 'setCart'
   | 'cartDiscounts'
@@ -134,6 +136,8 @@ export default function FormModal(props: FormModalProps) {
     editingSale,
     selectedEmployee,
     setSelectedEmployee,
+    saleDate,
+    setSaleDate,
     cart,
     setCart,
     cartDiscounts,
@@ -358,6 +362,18 @@ export default function FormModal(props: FormModalProps) {
                       </View>
                     </View>
                   ) : null}
+                  {!editingSale ? (
+                    <>
+                      {renderField(
+                        'Data da venda (opcional)',
+                        saleDate,
+                        (value) => setSaleDate(formatDateInput(value)),
+                        'DD/MM/AAAA',
+                        'number-pad',
+                      )}
+                      <Text style={styles.fieldHint}>Deixe em branco para registrar a venda com a data de hoje.</Text>
+                    </>
+                  ) : null}
                   {data.products.map((product) => {
                     const quantity = cart[product.id] ?? 0;
                     const originalQuantity = editingSale?.items
@@ -431,7 +447,13 @@ export default function FormModal(props: FormModalProps) {
                   {renderField('Telefone', orderPhone, setOrderPhone, '(00) 00000-0000', 'phone-pad')}
                   <View style={styles.formColumns}>
                     <View style={styles.formColumn}>
-                      {renderField('Data de entrega', orderDeliveryDate, setOrderDeliveryDate, 'DD/MM/AAAA')}
+                      {renderField(
+                        'Data de entrega',
+                        orderDeliveryDate,
+                        (value) => setOrderDeliveryDate(formatDateInput(value)),
+                        'DD/MM/AAAA',
+                        'number-pad',
+                      )}
                     </View>
                     <View style={styles.formColumn}>
                       {renderField('Alertar com quantos dias?', orderAlertDays, setOrderAlertDays, 'Opcional', 'number-pad')}
