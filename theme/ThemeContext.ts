@@ -147,6 +147,7 @@ export function createStyles(COLORS: Palette) {
   productPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
   productPrice: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
   oldPrice: { color: COLORS.muted, fontSize: 9, textDecorationLine: 'line-through' },
+  productActionsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6, marginTop: 8 },
   productStockRow: { borderTopWidth: 1, borderTopColor: COLORS.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingTop: 8 },
   stockLabel: { color: COLORS.muted, fontSize: 8 },
   stockLabelLow: { color: COLORS.red },

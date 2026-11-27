@@ -92,6 +92,7 @@ export default function App() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [form, setForm] = useState<FormType>(null);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [month, setMonth] = useState(new Date());
@@ -256,6 +257,7 @@ export default function App() {
   const openForm = (next: Exclude<FormType, null>) => {
     setForm(next);
     if (next === 'product') {
+      setEditingProductId(null);
       setProductName('');
       setProductCategory(productCategoryOptions[0] ?? '');
       setProductPrice('');
@@ -303,8 +305,25 @@ export default function App() {
 
   const closeForm = () => {
     setForm(null);
+    setEditingProductId(null);
     setEditingSaleId(null);
     setEditingExpenseId(null);
+  };
+
+  const openProductForEditing = (product: Product) => {
+    const activeProductOffer = data.offers.find((offer) => offer.productId === product.id && offer.active);
+    setEditingProductId(product.id);
+    setProductName(product.name);
+    setProductCategory(product.category);
+    setProductPrice(String(product.price));
+    setProductStock(String(product.stock));
+    setLowStockAt(String(product.lowStockAt));
+    setProductMakerEmployee(product.makerEmployee ?? '');
+    setProductCommissionPercent(String(product.commissionPercent ?? 0));
+    setProductDiscountType(activeProductOffer?.discountType ?? 'none');
+    setProductDiscountValue(activeProductOffer ? String(activeProductOffer.value) : '');
+    setPhotoUri(product.imageUri);
+    setForm('product');
   };
 
   const openSaleForEditing = (sale: Sale) => {
@@ -713,17 +732,29 @@ export default function App() {
       Alert.alert('Selecione quem fabricou', 'Escolha o funcionário responsável pela fabricação para cadastrar a comissão.');
       return;
     }
-    const id = `p${Date.now()}`;
+    const previousProduct = editingProductId
+      ? data.products.find((product) => product.id === editingProductId)
+      : undefined;
+    if (editingProductId && !previousProduct) {
+      Alert.alert('Produto não encontrado', 'Atualize a lista e tente novamente.');
+      return;
+    }
+
+    const id = previousProduct?.id ?? `p${Date.now()}`;
     let imageUri: string | undefined;
     if (photoUri) {
-      try {
-        imageUri = await persistProductImage(photoUri);
-      } catch (error) {
-        Alert.alert(
-          'Não foi possível salvar a foto',
-          error instanceof Error ? error.message : 'Tente escolher a imagem novamente.',
-        );
-        return;
+      if (photoUri === previousProduct?.imageUri) {
+        imageUri = photoUri;
+      } else {
+        try {
+          imageUri = await persistProductImage(photoUri);
+        } catch (error) {
+          Alert.alert(
+            'Não foi possível salvar a foto',
+            error instanceof Error ? error.message : 'Tente escolher a imagem novamente.',
+          );
+          return;
+        }
       }
     }
     const product: Product = {
@@ -737,20 +768,32 @@ export default function App() {
       ...(productMakerEmployee ? { makerEmployee: productMakerEmployee } : {}),
       commissionPercent,
     };
+    const activeProductOffer = previousProduct
+      ? data.offers.find((offer) => offer.productId === previousProduct.id && offer.active)
+      : undefined;
     const initialOffer: Offer | undefined = productDiscountType === 'none'
       ? undefined
       : {
-        id: `o${Date.now()}`,
+        id: activeProductOffer?.id ?? `o${Date.now()}`,
         productId: product.id,
-        name: 'Oferta inicial',
+        name: activeProductOffer?.name ?? 'Oferta inicial',
         discountType: productDiscountType,
         value: offerValue,
         active: true,
       };
     setData((current) => ({
       ...current,
-      products: [product, ...current.products],
-      offers: initialOffer ? [...current.offers, initialOffer] : current.offers,
+      products: previousProduct
+        ? current.products.map((item) => item.id === product.id ? product : item)
+        : [product, ...current.products],
+      offers: previousProduct
+        ? initialOffer
+          ? activeProductOffer
+            ? current.offers.map((offer) => offer.id === activeProductOffer.id ? initialOffer : offer)
+            : [...current.offers, initialOffer]
+          : current.offers.map((offer) =>
+            offer.productId === product.id && offer.active ? { ...offer, active: false } : offer)
+        : initialOffer ? [...current.offers, initialOffer] : current.offers,
     }));
     closeForm();
   };
@@ -1994,7 +2037,7 @@ export default function App() {
   );
 
   const renderForm = () => {
-    const title = form === 'product' ? 'Novo produto' : form === 'sale' ? editingSale ? 'Editar venda' : 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? editingExpenseId ? 'Editar gasto' : 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
+    const title = form === 'product' ? editingProductId ? 'Editar produto' : 'Novo produto' : form === 'sale' ? editingSale ? 'Editar venda' : 'Nova venda' : form === 'order' ? 'Novo pedido' : form === 'expense' ? editingExpenseId ? 'Editar gasto' : 'Registrar gasto' : form === 'supply' ? 'Novo insumo' : 'Criar oferta';
     const canSave = form === 'product' || form === 'sale' || form === 'order' || form === 'expense' || form === 'supply' || form === 'offer';
     const supplyQuantityNumber = Number.parseInt(supplyQuantity, 10);
     const supplyDailyUseNumber = Number.parseInt(supplyDailyUse, 10);
@@ -2022,9 +2065,19 @@ export default function App() {
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
               {form === 'product' ? (
                 <>
-                  <View style={styles.photoPicker}>
+                  <Pressable
+                    style={styles.photoPicker}
+                    onPress={() => choosePhoto('gallery')}
+                    accessibilityRole="button"
+                    accessibilityLabel={photoUri ? 'Alterar foto do produto' : 'Adicionar foto do produto'}
+                  >
                     {photoUri ? <Image source={{ uri: photoUri }} style={styles.photoPreview} /> : <View style={styles.photoPlaceholder}><Text style={styles.photoPlaceholderIcon}>＋</Text><Text style={styles.photoPlaceholderText}>Foto do produto</Text></View>}
-                  </View>
+                  </Pressable>
+                  {photoUri ? (
+                    <Pressable onPress={() => setPhotoUri(undefined)} style={styles.cancelEditButton} accessibilityRole="button">
+                      <Text style={styles.cancelEditText}>Remover foto</Text>
+                    </Pressable>
+                  ) : null}
                   <View style={styles.photoSourceRow}>
                     <Pressable
                       style={styles.photoSourceButton}
@@ -2336,7 +2389,7 @@ export default function App() {
               ) : null}
               {canSave ? (
                 <ActionButton
-                  label={form === 'product' ? 'Salvar produto' : form === 'sale' ? editingSale ? 'Salvar alterações' : 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? editingExpenseId ? 'Salvar alterações' : 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
+                  label={form === 'product' ? editingProductId ? 'Salvar alterações' : 'Salvar produto' : form === 'sale' ? editingSale ? 'Salvar alterações' : 'Confirmar venda' : form === 'order' ? 'Salvar pedido' : form === 'expense' ? editingExpenseId ? 'Salvar alterações' : 'Salvar gasto' : form === 'supply' ? 'Salvar insumo' : 'Ativar oferta'}
                   onPress={form === 'product' ? saveProduct : form === 'sale' ? saveSale : form === 'order' ? saveOrder : form === 'expense' ? saveExpense : form === 'supply' ? saveSupply : saveOffer}
                 />
               ) : null}
@@ -2380,6 +2433,7 @@ export default function App() {
                     query={query}
                     setQuery={setQuery}
                     openForm={openForm}
+                    editProduct={openProductForEditing}
                     deleteProduct={deleteProduct}
                     changeStock={changeStock}
                     offerFor={offerFor}

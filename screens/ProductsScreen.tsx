@@ -13,6 +13,7 @@ type ProductsScreenProps = {
   query: string;
   setQuery: (query: string) => void;
   openForm: (next: Exclude<FormType, null>) => void;
+  editProduct: (product: Product) => void;
   deleteProduct: (productId: string) => void;
   changeStock: (productId: string, adjustment: number) => void;
   offerFor: (productId: string) => Offer | undefined;
@@ -26,6 +27,7 @@ export default function ProductsScreen({
   query,
   setQuery,
   openForm,
+  editProduct,
   deleteProduct,
   changeStock,
   offerFor,
@@ -73,18 +75,28 @@ export default function ProductsScreen({
                 <Text style={styles.productCategory}>{product.category.toUpperCase()}</Text>
                 <View style={styles.productNameRow}>
                   <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
-                  <Pressable
-                    style={styles.deleteProductButton}
-                    onPress={() => deleteProduct(product.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Excluir ${product.name}`}
-                  >
-                    <Text style={styles.deleteProductText}>Excluir</Text>
-                  </Pressable>
                 </View>
                 <View style={styles.productPriceRow}>
                   <Text style={styles.productPrice}>{money(priceFor(product))}</Text>
                   {offer ? <Text style={styles.oldPrice}>{money(product.price)}</Text> : null}
+                </View>
+                <View style={styles.productActionsRow}>
+                  <Pressable
+                    style={styles.saleActionButton}
+                    onPress={() => editProduct(product)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Editar ${product.name}`}
+                  >
+                    <Text style={styles.saleActionText}>Editar</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.saleActionButton, styles.saleActionDanger]}
+                    onPress={() => deleteProduct(product.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Excluir ${product.name}`}
+                  >
+                    <Text style={[styles.saleActionText, styles.saleActionDangerText]}>Excluir</Text>
+                  </Pressable>
                 </View>
                 <View style={styles.productStockRow}>
                   <Text style={[styles.stockLabel, low && styles.stockLabelLow]}>{low ? 'Estoque baixo' : 'Em estoque'}</Text>
